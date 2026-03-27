@@ -9,4 +9,3 @@ thiserror = "2.0.18"
 md5 = "0.8.0"
 image = "0.25.10"
 xnb = { git = "https://github.com/jdm/xnb-rs.git" }
-eframe = "0.34.0"
