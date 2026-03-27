@@ -1,13 +1,9 @@
 use crate::utils::{read_string, SaveError};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::collections::HashMap;
-use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::io::{Cursor, Read, Seek};
 use std::fs;
 use std::path::Path;
-
-// ------------------------------------------------------------
-// Monster field value
-// ------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub enum MonsterFieldValue {
@@ -38,10 +34,6 @@ impl MonsterField {
         Ok(MonsterField { id, data_type, value })
     }
 }
-
-// ------------------------------------------------------------
-// Monster definition
-// ------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct MonsterDef {
@@ -123,10 +115,6 @@ impl MonsterDef {
     }
 }
 
-// ------------------------------------------------------------
-// Monster catalog
-// ------------------------------------------------------------
-
 pub struct MonsterCatalog {
     pub monsters: Vec<MonsterDef>,
     pub by_name: HashMap<String, i32>,
@@ -136,23 +124,26 @@ impl MonsterCatalog {
     pub fn load_from_bytes(data: &[u8]) -> Result<Self, SaveError> {
         let mut reader = Cursor::new(data);
         let count = reader.read_i32::<LittleEndian>()?;
+        #[cfg(debug_assertions)]
         eprintln!("=== Starting to parse {} Monsters ===", count);
 
         let mut monsters = Vec::with_capacity(count as usize);
         let mut by_name = HashMap::with_capacity(count as usize);
 
         for idx in 0..count {
+            #[cfg(debug_assertions)]
             eprintln!(
                 "\n--- Monster {} at position {} ---",
                 idx,
-                reader.stream_position().unwrap()
+                reader.stream_position()?
             );
 
             let def = MonsterDef::read(&mut reader)?;
+            #[cfg(debug_assertions)]
             eprintln!(
                 "--- Finished Monster {} at position {} ---\n",
                 idx,
-                reader.stream_position().unwrap()
+                reader.stream_position()?
             );
 
             by_name.insert(def.name.clone(), idx);

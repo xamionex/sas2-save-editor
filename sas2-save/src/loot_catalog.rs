@@ -16,7 +16,6 @@ pub enum LootFieldValue {
     Int(i32),
     Bool(bool),
     String(String),
-    // Add other types as needed
 }
 
 #[derive(Debug, Clone)]
@@ -38,24 +37,27 @@ pub struct LootDef {
 
 pub struct LootCatalog {
     pub loot_defs: Vec<LootDef>,
-    pub by_name: HashMap<String, usize>, // store usize indices
+    pub by_name: HashMap<String, usize>,
 }
 
 impl LootCatalog {
     pub fn load_from_bytes(data: &[u8]) -> Result<Self, SaveError> {
         let mut reader = Cursor::new(data);
         let count = reader.read_i32::<LittleEndian>()?;
+        #[cfg(debug_assertions)]
         eprintln!("=== Starting to parse {} LootDefs", count);
         let mut defs = Vec::with_capacity(count as usize);
         let mut by_name = HashMap::with_capacity(count as usize);
 
         for idx in 0..count {
+            #[cfg(debug_assertions)]
             eprintln!(
                 "\n--- LootDef {} at position {} ---",
                 idx,
                 reader.stream_position().unwrap()
             );
             let def = LootDef::read(&mut reader)?;
+        #[cfg(debug_assertions)]
             eprintln!(
                 "--- Finished LootDef {} at position {} ---\n",
                 idx,
@@ -75,6 +77,7 @@ impl LootCatalog {
 impl LootDef {
     fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, SaveError> {
         let name = read_string(reader)?;
+        #[cfg(debug_assertions)]
         eprintln!(
             "  name: \"{}\" at pos {}",
             name,
@@ -84,6 +87,7 @@ impl LootDef {
         let mut title = Vec::with_capacity(20);
         for i in 0..20 {
             let s = read_string(reader)?;
+            #[cfg(debug_assertions)]
             eprintln!(
                 "    title[{}]: \"{}\" at pos {}",
                 i,
@@ -96,6 +100,7 @@ impl LootDef {
         let mut description = Vec::with_capacity(20);
         for i in 0..20 {
             let s = read_string(reader)?;
+            #[cfg(debug_assertions)]
             eprintln!(
                 "    desc[{}]: \"{}\" at pos {}",
                 i,
@@ -106,36 +111,42 @@ impl LootDef {
         }
 
         let type_ = reader.read_i32::<LittleEndian>()?;
+        #[cfg(debug_assertions)]
         eprintln!(
             "  type_: {} at pos {}",
             type_,
             reader.stream_position().unwrap()
         );
         let sub_type = reader.read_i32::<LittleEndian>()?;
+        #[cfg(debug_assertions)]
         eprintln!(
             "  sub_type: {} at pos {}",
             sub_type,
             reader.stream_position().unwrap()
         );
         let cost = reader.read_f32::<LittleEndian>()?;
+        #[cfg(debug_assertions)]
         eprintln!(
             "  cost: {} at pos {}",
             cost,
             reader.stream_position().unwrap()
         );
         let img = reader.read_i32::<LittleEndian>()?;
+        #[cfg(debug_assertions)]
         eprintln!(
             "  img: {} at pos {}",
             img,
             reader.stream_position().unwrap()
         );
         let alt_img = reader.read_i32::<LittleEndian>()?;
+        #[cfg(debug_assertions)]
         eprintln!(
             "  alt_img: {} at pos {}",
             alt_img,
             reader.stream_position().unwrap()
         );
         let texture = read_string(reader)?;
+        #[cfg(debug_assertions)]
         eprintln!(
             "  texture: \"{}\" at pos {}",
             texture,
@@ -143,6 +154,7 @@ impl LootDef {
         );
 
         let field_count = reader.read_i32::<LittleEndian>()?;
+        #[cfg(debug_assertions)]
         eprintln!(
             "  field_count: {} at pos {}",
             field_count,
@@ -150,6 +162,7 @@ impl LootDef {
         );
         let mut fields = Vec::with_capacity(field_count as usize);
         for i in 0..field_count {
+        #[cfg(debug_assertions)]
             eprintln!(
                 "    reading field {} at pos {}",
                 i,
@@ -159,6 +172,7 @@ impl LootDef {
         }
 
         let flag_count = reader.read_i32::<LittleEndian>()?;
+        #[cfg(debug_assertions)]
         eprintln!(
             "  flag_count: {} at pos {}",
             flag_count,
@@ -167,6 +181,7 @@ impl LootDef {
         let mut flags = Vec::with_capacity(flag_count as usize);
         for i in 0..flag_count {
             let flag = reader.read_i32::<LittleEndian>()?;
+            #[cfg(debug_assertions)]
             eprintln!(
                 "    flag[{}]: {} at pos {}",
                 i,
@@ -177,12 +192,14 @@ impl LootDef {
         }
 
         let token_loot = read_string(reader)?;
+        #[cfg(debug_assertions)]
         eprintln!(
             "  token_loot: \"{}\" at pos {}",
             token_loot,
             reader.stream_position().unwrap()
         );
         let token_cost = reader.read_i32::<LittleEndian>()?;
+        #[cfg(debug_assertions)]
         eprintln!(
             "  token_cost: {} at pos {}",
             token_cost,

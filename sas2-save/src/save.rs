@@ -295,6 +295,7 @@ impl SaveData {
         let mut reader = Cursor::new(data);
         let version = reader.read_i32::<LittleEndian>()?;
 
+        // I failed at supporting saltguard here, if anyone wants to help, feel free to contribute
         // MOD SUPPORT: version 120 is a modded save. XOR key is 19 (same as vanilla version 19).
         let is_mod = version == 120;
         let is_vanilla = version == 18 || version == 19;
