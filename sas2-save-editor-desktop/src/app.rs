@@ -7,6 +7,7 @@ use sas2_save::monster_catalog::MonsterCatalog;
 use sas2_save::{SaveData, Item};
 use std::fs;
 use std::path::{Path, PathBuf};
+use eframe::egui::ScrollArea;
 use sas2_save::cosmetics::{AncestryCatalog, BeardCatalog, ClassCatalog, ColorCatalog, CrimeCatalog, EyeCatalog, HairCatalog, SexCatalog};
 
 #[derive(PartialEq)]
@@ -262,8 +263,8 @@ impl SaveEditorApp {
 
             let mut to_remove = Vec::new();
 
-            egui::ScrollArea::both()
-                .max_height(400.0)
+            ScrollArea::both()
+                .max_height(ui.available_height() - 32.0)
                 .auto_shrink([false; 2])
                 .show(ui, |ui| {
                     let mut categories: Vec<_> = grouped.keys().cloned().collect();
@@ -363,8 +364,8 @@ impl SaveEditorApp {
                     });
                 }
 
-                egui::ScrollArea::both()
-                    .max_height(400.0)
+                ScrollArea::both()
+                    .max_height(ui.available_height() - 32.0)
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
                         let mut categories: Vec<_> = grouped.keys().cloned().collect();
@@ -422,7 +423,7 @@ impl SaveEditorApp {
 
         // Editable flags list
         ui.label("Flags:");
-        egui::ScrollArea::vertical()
+        ScrollArea::vertical()
             .max_height(300.0)
             .show(ui, |ui| {
                 let mut to_remove = None;
@@ -471,7 +472,7 @@ impl SaveEditorApp {
         ui.heading("Bestiary");
         ui.separator();
 
-        egui::ScrollArea::vertical()
+        ScrollArea::vertical()
             .max_height(400.0)
             .auto_shrink([false; 2])
             .show(ui, |ui| {
@@ -583,27 +584,24 @@ impl SaveEditorApp {
 }
 
 impl eframe::App for SaveEditorApp {
-    fn ui(&mut self, ctx: &mut egui::Ui, _frame: &mut Frame) {
-        // Use ctx.ctx() to get the egui::Context for operations that need it
-        let egui_ctx = ctx.ctx();
-
-        egui::CentralPanel::default().show(egui_ctx, |ui| {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut Frame) {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             // Menu bar
-            egui::menu::bar(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("Open").clicked() {
                         self.open_file();
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button("Save").clicked() {
                         self.save_file();
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
                 ui.menu_button("Settings", |ui| {
                     if ui.button("Set Game Folder").clicked() {
                         self.choose_game_folder();
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
             });
@@ -632,7 +630,7 @@ impl eframe::App for SaveEditorApp {
 
             if let Some(save) = &mut save_taken {
                 // Tab bar
-                egui::TopBottomPanel::top("tabs").show_inside(ui, |ui| {
+                egui::Panel::top("tabs").show_inside(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.selectable_value(&mut self.active_tab, Tab::Stats, "Stats");
                         ui.selectable_value(&mut self.active_tab, Tab::Equipment, "Equipment");
@@ -651,7 +649,7 @@ impl eframe::App for SaveEditorApp {
                     Tab::Cosmetics => self.show_cosmetics_ui(ui, save),
                 }
             } else {
-                ui.label("No save file loaded. Click File → Open to load a save.");
+                ui.label("No save file loaded. Click File -> Open to load a save.");
             }
 
             self.save_data = save_taken;
