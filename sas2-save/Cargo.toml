@@ -1,0 +1,12 @@
+[package]
+name = "sas2-save"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+byteorder = "1.5"
+thiserror = "2.0.18"
+md5 = "0.8.0"
+image = "0.25.10"
+xnb = { git = "https://github.com/jdm/xnb-rs.git" }
+eframe = "0.34.0"

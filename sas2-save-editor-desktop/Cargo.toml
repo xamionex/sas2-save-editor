@@ -1,0 +1,12 @@
+[package]
+name = "sas2-save-editor-desktop"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sas2-save = { path = "../sas2-save" }
+eframe = "0.34.0"
+rfd = "0.17.2"
+directories = "6.0.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
