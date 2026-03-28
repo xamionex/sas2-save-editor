@@ -20,6 +20,7 @@ pub enum LootFieldValue {
 
 #[derive(Debug, Clone)]
 pub struct LootDef {
+    pub id: i32,
     pub name: String,
     pub title: Vec<String>,
     pub description: Vec<String>,
@@ -207,6 +208,7 @@ impl LootDef {
         );
 
         Ok(LootDef {
+            id: 0,
             name,
             title,
             description,

@@ -9,5 +9,6 @@ mod item;
 mod equipment;
 mod player_flags;
 mod stats;
+pub mod loot_names;
 
 pub use save::{SaveData, Stats, Equipment, Item, PlayerFlags, Bestiary, BestiaryBeast};
