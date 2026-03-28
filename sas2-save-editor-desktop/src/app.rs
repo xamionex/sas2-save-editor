@@ -2,12 +2,12 @@ use crate::config::AppConfig;
 use crate::catalog::{load_loot_catalog, load_monster_catalog};
 use eframe::{egui, Frame};
 use rfd::FileDialog;
-use sas2_save::loot_catalog::LootCatalog;
+use sas2_save::loot_catalog::{LootCatalog, LootDef};
 use sas2_save::monster_catalog::MonsterCatalog;
-use sas2_save::{SaveData, Item};
+use sas2_save::{SaveData, Item, loot_names};
 use std::fs;
 use std::path::{Path, PathBuf};
-use eframe::egui::ScrollArea;
+use eframe::egui::{Grid, ScrollArea, TextureHandle};
 use sas2_save::cosmetics::{AncestryCatalog, BeardCatalog, ClassCatalog, ColorCatalog, CrimeCatalog, EyeCatalog, HairCatalog, SexCatalog};
 
 #[derive(PartialEq)]
@@ -17,6 +17,13 @@ pub enum Tab {
     Flags,
     Bestiary,
     Cosmetics,
+}
+
+#[derive(PartialEq)]
+pub enum EquipmentSubTab {
+    Inventory,
+    Stockpile,
+    AddItems,
 }
 
 pub struct SaveEditorApp {
@@ -30,12 +37,15 @@ pub struct SaveEditorApp {
     pub catalog_error: Option<String>,
     pub monster_catalog: Option<MonsterCatalog>,
     pub monster_catalog_error: Option<String>,
-    pub item_atlas: Option<egui::TextureHandle>,
+    pub item_atlas: Option<TextureHandle>,
     pub atlas_width: u32,
     pub atlas_height: u32,
-
-    // For inline item catalog
     pub item_search_filter: String,
+    pub equipment_subtab: EquipmentSubTab,
+    pub selected_equipment_item: Option<usize>,
+    pub selected_catalog_item: Option<usize>,
+    pub add_item_count: i32,
+    pub add_item_upgrade: i32,
 }
 
 impl Default for SaveEditorApp {
@@ -54,6 +64,11 @@ impl Default for SaveEditorApp {
             atlas_width: 0,
             atlas_height: 0,
             item_search_filter: String::new(),
+            equipment_subtab: EquipmentSubTab::Inventory,
+            selected_equipment_item: None,
+            selected_catalog_item: None,
+            add_item_count: 1,
+            add_item_upgrade: 0,
         };
         // Try to load catalogs if game path is set
         if let Some(game_path) = &app.config.game_path {
@@ -161,58 +176,6 @@ impl SaveEditorApp {
         }
     }
 
-    pub fn get_item_category(&self, loot_idx: i32) -> Option<String> {
-        if let Some(catalog) = &self.catalog {
-            if let Some(def) = catalog.loot_defs.get(loot_idx as usize) {
-                return Some(match def.type_ {
-                    1 => "Weapons".to_string(),
-                    2 => "Ranged".to_string(),
-                    0 => match def.sub_type {
-                        0 => "Helms",
-                        1 => "Chests",
-                        2 => "Gloves",
-                        3 => "Boots",
-                        _ => "Armor",
-                    }
-                        .to_string(),
-                    3 => "Consumables".to_string(),
-                    4 => "Materials".to_string(),
-                    5 => "Keys".to_string(),
-                    6 => "Charms".to_string(),
-                    7 => "Magic".to_string(),
-                    8 => "Gestures".to_string(),
-                    _ => "Other".to_string(),
-                });
-            }
-        }
-        None
-    }
-
-    pub fn add_icon(&self, ui: &mut egui::Ui, icon_uv: Option<egui::Rect>) {
-        if let (Some(atlas), Some(uv)) = (&self.item_atlas, icon_uv) {
-            ui.add(
-                egui::Image::from_texture(atlas)
-                    .fit_to_exact_size(egui::vec2(48.0, 48.0))
-                    .uv(uv),
-            );
-        } else {
-            ui.add_space(48.0);
-        }
-    }
-
-    /// Draws the icon and truncated name of an item, then calls the closure to add controls.
-    pub fn draw_item_cell<F>(&self, ui: &mut egui::Ui, name: &str, icon_uv: Option<egui::Rect>, controls: F)
-    where
-        F: FnOnce(&mut egui::Ui),
-    {
-        ui.vertical(|ui| {
-            self.add_icon(ui, icon_uv);
-            let short_name = if name.len() > 15 { &name[..15] } else { name };
-            ui.label(short_name);
-            controls(ui);
-        });
-    }
-
     pub fn show_stats_ui(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
         ui.heading("Stats");
         ui.separator();
@@ -249,171 +212,470 @@ impl SaveEditorApp {
             }
         }
 
-        // Existing inventory section
-        ui.collapsing("Inventory", |ui| {
-            // Group inventory items by category, storing index and mutable reference
-            let mut grouped: std::collections::HashMap<String, Vec<(usize, &mut Item)>> =
-                std::collections::HashMap::new();
-            for (idx, item) in save.equipment.inventory_items.iter_mut().enumerate() {
-                let cat = self
-                    .get_item_category(item.loot_idx)
-                    .unwrap_or_else(|| "Other".to_string());
-                grouped.entry(cat).or_default().push((idx, item));
+        // Sub-tab bar
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.equipment_subtab, EquipmentSubTab::Inventory, "Inventory");
+            ui.selectable_value(&mut self.equipment_subtab, EquipmentSubTab::Stockpile, "Stockpile");
+            ui.selectable_value(&mut self.equipment_subtab, EquipmentSubTab::AddItems, "Add Items");
+        });
+        ui.add_space(8.0);
+
+        match self.equipment_subtab {
+            EquipmentSubTab::Inventory | EquipmentSubTab::Stockpile => {
+                self.show_inventory_or_stockpile(ui, save);
             }
+            EquipmentSubTab::AddItems => {
+                self.show_add_items_tab(ui, save);
+            }
+        }
+    }
 
-            let mut to_remove = Vec::new();
+    fn get_icon_uv(&self, def: &LootDef, atlas: Option<&TextureHandle>, atlas_width: f32, atlas_height: f32) -> Option<egui::Rect> {
+        let icon_uv = if def.img >= 0 && atlas.is_some() {
+            let x = (def.img as u32 % 32) * 128;
+            let y = (def.img as u32 / 32) * 128;
 
-            ScrollArea::both()
-                .max_height(ui.available_height() - 32.0)
-                .auto_shrink([false; 2])
-                .show(ui, |ui| {
-                    let mut categories: Vec<_> = grouped.keys().cloned().collect();
-                    categories.sort();
-                    for cat in categories {
-                        let items = grouped.get_mut(&cat).unwrap();
-                        ui.label(egui::RichText::new(&cat).strong());
-                        ui.add_space(4.0);
-                        egui::Grid::new(&cat)
-                            .num_columns(6)
-                            .spacing([8.0, 8.0])
-                            .show(ui, |ui| {
-                                for (idx_ref, item_ref) in items.iter_mut() {
-                                    let idx = *idx_ref;
-                                    let item = &mut **item_ref;
+            Some(egui::Rect::from_min_max(
+                egui::pos2(
+                    x as f32 / atlas_width,
+                    y as f32 / atlas_height,
+                ),
+                egui::pos2(
+                    (x + 128) as f32 / atlas_width,
+                    (y + 128) as f32 / atlas_height,
+                ),
+            ))
+        } else {
+            None
+        };
+        icon_uv
+    }
 
-                                    let (item_name, icon_uv) = if let Some(catalog) = &self.catalog {
-                                        let def = catalog.loot_defs.get(item.loot_idx as usize);
-                                        let name = def
-                                            .map(|d| d.name.clone())
-                                            .unwrap_or_else(|| format!("Unknown (ID: {})", item.loot_idx));
-                                        let uv = def.and_then(|d| {
-                                            let img = d.img;
-                                            if img >= 0 && self.item_atlas.is_some() {
-                                                let x = (img as u32 % 32) * 128;
-                                                let y = (img as u32 / 32) * 128;
-                                                Some(egui::Rect::from_min_max(
-                                                    egui::pos2(
-                                                        x as f32 / self.atlas_width as f32,
-                                                        y as f32 / self.atlas_height as f32,
-                                                    ),
-                                                    egui::pos2(
-                                                        (x + 128) as f32 / self.atlas_width as f32,
-                                                        (y + 128) as f32 / self.atlas_height as f32,
-                                                    ),
-                                                ))
-                                            } else {
-                                                None
-                                            }
-                                        });
-                                        (name, uv)
+    fn show_inventory_or_stockpile(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
+        let stockpile_mode = self.equipment_subtab == EquipmentSubTab::Stockpile;
+        let items = &mut save.equipment.inventory_items;
+
+        let filtered_indices: Vec<usize> = items
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, item)| {
+                if item.stock_piled == stockpile_mode {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let catalog = self.catalog.as_ref();
+        let atlas = self.item_atlas.as_ref();
+        let atlas_width = self.atlas_width;
+        let atlas_height = self.atlas_height;
+
+        let mut selected_equipment_item_local = self.selected_equipment_item;
+
+        let full_width = ui.available_width();
+        let height = ui.available_height();
+
+        ui.horizontal(|ui| {
+            // LEFT
+            ui.allocate_ui_with_layout(
+                egui::vec2(full_width * 0.6, height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    let mut clicked_item = None;
+
+                    ScrollArea::both()
+                        .max_height(ui.available_height())
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            let mut grouped: std::collections::HashMap<String, Vec<usize>> =
+                                std::collections::HashMap::new();
+
+                            for &orig_idx in &filtered_indices {
+                                let item = &items[orig_idx];
+
+                                let cat = if let Some(catalog) = catalog {
+                                    if let Some(def) =
+                                        catalog.loot_defs.get(item.loot_idx as usize)
+                                    {
+                                        let type_name = loot_names::get_type_name(def.type_);
+                                        let subtype_name =
+                                            loot_names::get_subtype_name(def.type_, def.sub_type);
+                                        format!("{} - {}", type_name, subtype_name)
                                     } else {
-                                        (format!("Item ID: {}", item.loot_idx), None)
-                                    };
+                                        "Other".to_string()
+                                    }
+                                } else {
+                                    "Other".to_string()
+                                };
 
-                                    self.draw_item_cell(ui, &item_name, icon_uv, |ui| {
-                                        ui.horizontal(|ui| {
-                                            ui.add(egui::DragValue::new(&mut item.count).speed(1).range(0..=999));
-                                            if ui.button("X").clicked() {
-                                                to_remove.push(idx);
-                                            }
-                                        });
+                                grouped.entry(cat).or_default().push(orig_idx);
+                            }
+
+                            let mut to_remove: Vec<usize> = Vec::new();
+
+                            let mut categories: Vec<_> = grouped.keys().cloned().collect();
+                            categories.sort();
+
+                            for cat in categories {
+                                let orig_indices = grouped.get(&cat).unwrap();
+
+                                ui.label(egui::RichText::new(&cat).strong());
+                                ui.add_space(4.0);
+
+                                Grid::new(&cat)
+                                    .spacing([8.0, 8.0])
+                                    .show(ui, |ui| {
+                                        for &orig_idx in orig_indices {
+                                            let item = &mut items[orig_idx];
+
+                                            let (item_name, icon_uv) = if let Some(catalog) = catalog {
+                                                if let Some(def) =
+                                                    catalog.loot_defs.get(item.loot_idx as usize)
+                                                {
+                                                    let name = def.title[0].clone();
+
+                                                    let uv = self.get_icon_uv(def, atlas, atlas_width as f32, atlas_height as f32);
+
+                                                    (name, uv)
+                                                } else {
+                                                    (format!("Unknown ({})", item.loot_idx), None)
+                                                }
+                                            } else {
+                                                (format!("Item {}", item.loot_idx), None)
+                                            };
+
+                                            ui.vertical(|ui| {
+                                                // Image as button
+                                                let response = if let Some(uv) = icon_uv {
+                                                    ui.add(
+                                                        egui::Button::image(
+                                                            egui::Image::from_texture(atlas.unwrap())
+                                                                .fit_to_exact_size(egui::vec2(48.0, 48.0))
+                                                                .uv(uv),
+                                                        )
+                                                    )
+                                                } else {
+                                                    ui.add_space(48.0);
+                                                    ui.allocate_response(egui::vec2(48.0, 48.0), egui::Sense::click())
+                                                };
+
+                                                if response.clicked() {
+                                                    clicked_item = Some(orig_idx);
+                                                }
+
+                                                // Name under the button (non-clickable)
+                                                ui.scope(|ui| {
+                                                    ui.style_mut().interaction.selectable_labels = false;
+
+                                                    ui.add(
+                                                        egui::Label::new(&item_name)
+                                                            .sense(egui::Sense::empty())
+                                                    );
+                                                });
+
+                                                //ui.add(
+                                                //    egui::DragValue::new(&mut item.count)
+                                                //        .speed(1)
+                                                //        .range(0..=999),
+                                                //);
+
+                                                //if ui.button("X").clicked() {
+                                                //    to_remove.push(orig_idx);
+                                                //}
+                                            });
+                                        }
                                     });
-                                }
-                            });
-                        ui.add_space(8.0);
-                    }
-                });
 
-            drop(grouped);
-            // Remove items in reverse order to keep indices valid
-            for idx in to_remove.into_iter().rev() {
-                save.equipment.inventory_items.remove(idx);
-            }
+                                ui.add_space(8.0);
+                            }
+
+                            if !to_remove.is_empty() {
+                                to_remove.sort_unstable_by(|a, b| b.cmp(a));
+                                for idx in to_remove {
+                                    items.remove(idx);
+
+                                    if let Some(sel) = selected_equipment_item_local {
+                                        if sel == idx {
+                                            selected_equipment_item_local = None;
+                                        } else if sel > idx {
+                                            selected_equipment_item_local = Some(sel - 1);
+                                        }
+                                    }
+                                }
+                            }
+                        });
+
+                    if let Some(idx) = clicked_item {
+                        selected_equipment_item_local = Some(idx);
+                    }
+                },
+            );
+
+            // RIGHT
+            ui.allocate_ui_with_layout(
+                egui::vec2(full_width * 0.4, height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    if let Some(orig_idx) = selected_equipment_item_local {
+                        if orig_idx < items.len() {
+                            let item = &mut items[orig_idx];
+
+                            if let Some(catalog) = catalog {
+                                if let Some(def) =
+                                    catalog.loot_defs.get(item.loot_idx as usize)
+                                {
+                                    Self::draw_item_details(ui, def, item);
+
+                                    if ui.button("Remove Item").clicked() {
+                                        items.remove(orig_idx);
+                                        selected_equipment_item_local = None;
+                                    }
+                                } else {
+                                    ui.label("Item definition not found.");
+                                }
+                            } else {
+                                ui.label("Catalog not loaded.");
+                            }
+                        }
+                    } else {
+                        ui.label("No item selected.");
+                    }
+                },
+            );
         });
 
-        // Add item from catalog
-        ui.collapsing("Add Item", |ui| {
-            if let Some(catalog) = &self.catalog {
-                ui.horizontal(|ui| {
-                    ui.label("Search:");
-                    ui.text_edit_singleline(&mut self.item_search_filter);
-                });
-                ui.add_space(4.0);
+        self.selected_equipment_item = selected_equipment_item_local;
+    }
 
-                struct CatalogItemInfo {
-                    loot_idx: i32,
-                    name: String,
-                    img: i32,
+    fn show_add_items_tab(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
+        let catalog = self.catalog.as_ref();
+        let atlas = self.item_atlas.as_ref();
+        let atlas_width = self.atlas_width;
+        let atlas_height = self.atlas_height;
+
+        let item_search_filter = &mut self.item_search_filter;
+
+        let mut selected_catalog_item_local = self.selected_catalog_item;
+        let mut add_item_count_local = self.add_item_count;
+        let mut add_item_upgrade_local = self.add_item_upgrade;
+
+        if let Some(catalog) = catalog {
+            ui.horizontal(|ui| {
+                ui.label("Search:");
+                ui.text_edit_singleline(item_search_filter);
+            });
+
+            let full_width = ui.available_width();
+            let height = ui.available_height();
+
+            // Pre-group
+            let mut grouped: std::collections::HashMap<
+                String,
+                Vec<(usize, &LootDef)>,
+            > = std::collections::HashMap::new();
+
+            for (idx, def) in catalog.loot_defs.iter().enumerate() {
+                if !item_search_filter.is_empty()
+                    && !def
+                    .name
+                    .to_lowercase()
+                    .contains(&item_search_filter.to_lowercase())
+                {
+                    continue;
                 }
-                let mut grouped: std::collections::HashMap<String, Vec<CatalogItemInfo>> =
-                    std::collections::HashMap::new();
 
-                for (idx, def) in catalog.loot_defs.iter().enumerate() {
-                    let name_lower = def.name.to_lowercase();
-                    let filter_lower = self.item_search_filter.to_lowercase();
-                    if !self.item_search_filter.is_empty() && !name_lower.contains(&filter_lower) {
-                        continue;
-                    }
-                    let cat = self
-                        .get_item_category(idx as i32)
-                        .unwrap_or_else(|| "Other".to_string());
-                    grouped.entry(cat).or_default().push(CatalogItemInfo {
-                        loot_idx: idx as i32,
-                        name: def.name.clone(),
-                        img: def.img,
-                    });
-                }
+                let type_name = loot_names::get_type_name(def.type_);
+                let subtype_name = loot_names::get_subtype_name(def.type_, def.sub_type);
+                let cat = format!("{} - {}", type_name, subtype_name);
 
-                ScrollArea::both()
-                    .max_height(ui.available_height() - 32.0)
-                    .auto_shrink([false; 2])
-                    .show(ui, |ui| {
-                        let mut categories: Vec<_> = grouped.keys().cloned().collect();
-                        categories.sort();
-                        for cat in categories {
-                            let items = grouped.get(&cat).unwrap();
-                            ui.label(egui::RichText::new(&cat).strong());
-                            ui.add_space(4.0);
-                            egui::Grid::new(&format!("catalog_{}", cat))
-                                .num_columns(6)
-                                .spacing([8.0, 8.0])
-                                .show(ui, |ui| {
-                                    for info in items {
-                                        let icon_uv = if info.img >= 0 && self.item_atlas.is_some() {
-                                            let x = (info.img as u32 % 32) * 128;
-                                            let y = (info.img as u32 / 32) * 128;
-                                            Some(egui::Rect::from_min_max(
-                                                egui::pos2(
-                                                    x as f32 / self.atlas_width as f32,
-                                                    y as f32 / self.atlas_height as f32,
-                                                ),
-                                                egui::pos2(
-                                                    (x + 128) as f32 / self.atlas_width as f32,
-                                                    (y + 128) as f32 / self.atlas_height as f32,
-                                                ),
-                                            ))
-                                        } else {
-                                            None
-                                        };
+                grouped.entry(cat).or_default().push((idx, def));
+            }
 
-                                        self.draw_item_cell(ui, &info.name, icon_uv, |ui| {
-                                            if ui.button("+").clicked() {
-                                                save.equipment.inventory_items.push(Item {
-                                                    loot_idx: info.loot_idx,
-                                                    count: 1,
-                                                    upgrade: 0,
-                                                    stock_piled: false,
+            ui.horizontal(|ui| {
+                // LEFT
+                ui.allocate_ui_with_layout(
+                    egui::vec2(full_width * 0.6, height),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        let mut clicked_item = None;
+
+                        ScrollArea::both().show(ui, |ui| {
+                            let mut categories: Vec<_> = grouped.keys().cloned().collect();
+                            categories.sort();
+
+                            for cat in categories {
+                                let items = grouped.get(&cat).unwrap();
+
+                                ui.label(egui::RichText::new(&cat).strong());
+
+                                Grid::new(&cat)
+                                    .spacing([8.0, 8.0])
+                                    .show(ui, |ui| {
+                                        for (idx, def) in items {
+                                            let icon_uv = self.get_icon_uv(def, atlas, atlas_width as f32, atlas_height as f32);
+
+                                            ui.vertical(|ui| {
+                                                // Image as button
+                                                let response = if let Some(uv) = icon_uv {
+                                                    ui.add(
+                                                        egui::Button::image(
+                                                            egui::Image::from_texture(atlas.unwrap())
+                                                                .fit_to_exact_size(egui::vec2(48.0, 48.0))
+                                                                .uv(uv),
+                                                        )
+                                                    )
+                                                } else {
+                                                    ui.add_space(48.0);
+                                                    ui.allocate_response(egui::vec2(48.0, 48.0), egui::Sense::click())
+                                                };
+
+                                                if response.clicked() {
+                                                    clicked_item = Some(*idx);
+                                                }
+
+                                                // Name under the button
+                                                ui.scope(|ui| {
+                                                    ui.style_mut().interaction.selectable_labels = false;
+
+                                                    ui.add(
+                                                        egui::Label::new(&def.title[0])
+                                                            .sense(egui::Sense::empty())
+                                                    );
                                                 });
-                                            }
+                                            });
+                                        }
+                                    });
+                            }
+                        });
+
+                        if let Some(idx) = clicked_item {
+                            selected_catalog_item_local = Some(idx);
+                        }
+                    },
+                );
+
+                // RIGHT
+                ui.allocate_ui_with_layout(
+                    egui::vec2(full_width * 0.4, height),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        if let Some(idx) = selected_catalog_item_local {
+                            if let Some(def) = catalog.loot_defs.get(idx) {
+                                let mut dummy_item = Item {
+                                    loot_idx: idx as i32,
+                                    count: add_item_count_local,
+                                    upgrade: add_item_upgrade_local,
+                                    stock_piled: false,
+                                };
+
+                                Self::draw_item_details(ui, def, &mut dummy_item);
+
+                                add_item_count_local = dummy_item.count;
+                                add_item_upgrade_local = dummy_item.upgrade;
+
+                                ui.horizontal(|ui| {
+                                    if ui.button("Add to Inventory").clicked() {
+                                        save.equipment.inventory_items.push(Item {
+                                            loot_idx: idx as i32,
+                                            count: add_item_count_local,
+                                            upgrade: add_item_upgrade_local,
+                                            stock_piled: false,
+                                        });
+                                    }
+
+                                    if ui.button("Add to Stockpile").clicked() {
+                                        save.equipment.inventory_items.push(Item {
+                                            loot_idx: idx as i32,
+                                            count: add_item_count_local,
+                                            upgrade: add_item_upgrade_local,
+                                            stock_piled: true,
                                         });
                                     }
                                 });
-                            ui.add_space(8.0);
+                            }
+                        } else {
+                            ui.label("Select an item.");
                         }
-                    });
-            } else {
-                ui.label("Catalog not loaded. Please set the game folder.");
+                    },
+                );
+            });
+        } else {
+            ui.label("Catalog not loaded.");
+        }
+
+        self.selected_catalog_item = selected_catalog_item_local;
+        self.add_item_count = add_item_count_local;
+        self.add_item_upgrade = add_item_upgrade_local;
+    }
+
+    /// Draw detailed information about an item (name, title, description, fields, etc.)
+    fn draw_item_details(
+        ui: &mut egui::Ui,
+        def: &LootDef,
+        item: &mut Item,
+    ) {
+        ui.heading("Item Details");
+        ui.separator();
+
+        ui.label(format!("Name: {}", def.name));
+
+        if let Some(title) = def.title.first() {
+            if !title.is_empty() {
+                ui.label(format!("Title: {}", title));
             }
+        }
+
+        if let Some(desc) = def.description.first() {
+            if !desc.is_empty() {
+                ui.label(format!("Description: {}", desc));
+            }
+        }
+
+        let type_name = loot_names::get_type_name(def.type_);
+        let subtype_name = loot_names::get_subtype_name(def.type_, def.sub_type);
+        ui.label(format!("Type: {} - {}", type_name, subtype_name));
+        ui.label(format!("Cost: {:.0}", def.cost));
+
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            ui.label("Count:");
+            ui.add(egui::DragValue::new(&mut item.count).range(0..=999));
+
+            ui.label("Upgrade:");
+            ui.add(egui::DragValue::new(&mut item.upgrade).range(0..=10));
+        });
+
+        ui.add_space(8.0);
+
+        ui.separator();
+
+        ui.collapsing(format!("Fields ({})", def.fields.len()), |ui| {
+            ScrollArea::vertical()
+                .max_height(150.0)
+                .show(ui, |ui| {
+                    for field in &def.fields {
+                        let field_name = loot_names::get_field_name(def.type_, field.id);
+
+                        let field_value = match &field.value {
+                            sas2_save::loot_catalog::LootFieldValue::Float(v) => format!("{:.2}", v),
+                            sas2_save::loot_catalog::LootFieldValue::Int(v) => v.to_string(),
+                            sas2_save::loot_catalog::LootFieldValue::Bool(v) => v.to_string(),
+                            sas2_save::loot_catalog::LootFieldValue::String(v) => v.clone(),
+                        };
+
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(field_name)
+                                    .weak()
+                                    .size(12.0),
+                            );
+                            ui.label(field_value);
+                        });
+                    }
+                });
         });
     }
 
