@@ -727,7 +727,9 @@ impl SaveEditorApp {
             .max()
             .unwrap_or(0);
 
-        ui.label(format!("NG Level (derived from flags): {}", save.flags.ng_level));
+        ui.label(format!("NG Level: {}", save.flags.ng_level));
+        ui.label("Note: NG level is derived from flags. To change NG level, add or edit a flag starting with $&ng_. For example level 3 is $&ng_3");
+        ui.label("Flags preserved across NG cycles: v$t_AREA_NOWHERE, dawnlight_saved, shroud_saved, blueheart_saved, oath_saved, sheriff_saved, chaos_saved. The flag \"$1ntr0\" is automatically added if missing.");
     }
 
     pub fn show_bestiary_ui(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
