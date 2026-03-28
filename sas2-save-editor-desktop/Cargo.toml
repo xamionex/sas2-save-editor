@@ -10,3 +10,4 @@ rfd = "0.17.2"
 directories = "6.0.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+hide_console = "0.2.1"
