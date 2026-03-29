@@ -55,14 +55,14 @@ impl LootCatalog {
             eprintln!(
                 "\n--- LootDef {} at position {} ---",
                 idx,
-                reader.stream_position().unwrap()
+                reader.stream_position()?
             );
             let def = LootDef::read(&mut reader)?;
         #[cfg(debug_assertions)]
             eprintln!(
                 "--- Finished LootDef {} at position {} ---\n",
                 idx,
-                reader.stream_position().unwrap()
+                reader.stream_position()?
             );
             by_name.insert(def.name.clone(), idx as usize);
             defs.push(def);
@@ -82,7 +82,7 @@ impl LootDef {
         eprintln!(
             "  name: \"{}\" at pos {}",
             name,
-            reader.stream_position().unwrap()
+            reader.stream_position()?
         );
 
         let mut title = Vec::with_capacity(20);
@@ -93,7 +93,7 @@ impl LootDef {
                 "    title[{}]: \"{}\" at pos {}",
                 i,
                 s,
-                reader.stream_position().unwrap()
+                reader.stream_position()?
             );
             title.push(s);
         }
@@ -106,7 +106,7 @@ impl LootDef {
                 "    desc[{}]: \"{}\" at pos {}",
                 i,
                 s,
-                reader.stream_position().unwrap()
+                reader.stream_position()?
             );
             description.push(s);
         }
@@ -116,42 +116,42 @@ impl LootDef {
         eprintln!(
             "  type_: {} at pos {}",
             type_,
-            reader.stream_position().unwrap()
+            reader.stream_position()?
         );
         let sub_type = reader.read_i32::<LittleEndian>()?;
         #[cfg(debug_assertions)]
         eprintln!(
             "  sub_type: {} at pos {}",
             sub_type,
-            reader.stream_position().unwrap()
+            reader.stream_position()?
         );
         let cost = reader.read_f32::<LittleEndian>()?;
         #[cfg(debug_assertions)]
         eprintln!(
             "  cost: {} at pos {}",
             cost,
-            reader.stream_position().unwrap()
+            reader.stream_position()?
         );
         let img = reader.read_i32::<LittleEndian>()?;
         #[cfg(debug_assertions)]
         eprintln!(
             "  img: {} at pos {}",
             img,
-            reader.stream_position().unwrap()
+            reader.stream_position()?
         );
         let alt_img = reader.read_i32::<LittleEndian>()?;
         #[cfg(debug_assertions)]
         eprintln!(
             "  alt_img: {} at pos {}",
             alt_img,
-            reader.stream_position().unwrap()
+            reader.stream_position()?
         );
         let texture = read_string(reader)?;
         #[cfg(debug_assertions)]
         eprintln!(
             "  texture: \"{}\" at pos {}",
             texture,
-            reader.stream_position().unwrap()
+            reader.stream_position()?
         );
 
         let field_count = reader.read_i32::<LittleEndian>()?;
@@ -159,7 +159,7 @@ impl LootDef {
         eprintln!(
             "  field_count: {} at pos {}",
             field_count,
-            reader.stream_position().unwrap()
+            reader.stream_position()?
         );
         let mut fields = Vec::with_capacity(field_count as usize);
         for i in 0..field_count {
@@ -167,7 +167,7 @@ impl LootDef {
             eprintln!(
                 "    reading field {} at pos {}",
                 i,
-                reader.stream_position().unwrap()
+                reader.stream_position()?
             );
             fields.push(LootField::read(reader)?);
         }
@@ -177,7 +177,7 @@ impl LootDef {
         eprintln!(
             "  flag_count: {} at pos {}",
             flag_count,
-            reader.stream_position().unwrap()
+            reader.stream_position()?
         );
         let mut flags = Vec::with_capacity(flag_count as usize);
         for i in 0..flag_count {
@@ -187,7 +187,7 @@ impl LootDef {
                 "    flag[{}]: {} at pos {}",
                 i,
                 flag,
-                reader.stream_position().unwrap()
+                reader.stream_position()?
             );
             flags.push(flag);
         }
@@ -197,14 +197,14 @@ impl LootDef {
         eprintln!(
             "  token_loot: \"{}\" at pos {}",
             token_loot,
-            reader.stream_position().unwrap()
+            reader.stream_position()?
         );
         let token_cost = reader.read_i32::<LittleEndian>()?;
         #[cfg(debug_assertions)]
         eprintln!(
             "  token_cost: {} at pos {}",
             token_cost,
-            reader.stream_position().unwrap()
+            reader.stream_position()?
         );
 
         Ok(LootDef {

@@ -1,13 +1,15 @@
 use crate::config::AppConfig;
-use crate::catalog::{load_loot_catalog, load_monster_catalog};
+use crate::catalog::{load_loot_catalog, load_monster_catalog, load_skilltree_catalog, load_skilltree_texture};
 use eframe::{egui, Frame};
 use rfd::FileDialog;
 use sas2_save::loot_catalog::{LootCatalog, LootDef};
 use sas2_save::monster_catalog::MonsterCatalog;
-use sas2_save::{SaveData, Item, loot_names};
+use sas2_save::skilltree::{SkillTreeCatalog, SKILL_IMG};
+use sas2_save::{SaveData, Item, loot_names, BestiaryBeast};
 use std::fs;
 use std::path::{Path, PathBuf};
 use eframe::egui::{Grid, ScrollArea, TextureHandle};
+use egui::{pos2, Rect, Response};
 use sas2_save::cosmetics::{AncestryCatalog, BeardCatalog, ClassCatalog, ColorCatalog, CrimeCatalog, EyeCatalog, HairCatalog, SexCatalog};
 
 #[derive(PartialEq)]
@@ -17,6 +19,7 @@ pub enum Tab {
     Flags,
     Bestiary,
     Cosmetics,
+    SkillTree,
 }
 
 #[derive(PartialEq)]
@@ -46,6 +49,17 @@ pub struct SaveEditorApp {
     pub selected_catalog_item: Option<usize>,
     pub add_item_count: i32,
     pub add_item_upgrade: i32,
+
+    // Skill tree
+    pub skilltree_catalog: Option<SkillTreeCatalog>,
+    pub skilltree_texture: Option<TextureHandle>,
+    pub skilltree_zoom: f32,
+    pub skilltree_scroll: egui::Vec2,
+    pub selected_skill_node: Option<usize>,
+    pub skilltree_catalog_error: Option<String>,
+    pub skilltree_texture_error: Option<String>,
+    pub skilltree_centered: bool,
+    pub stats_dirty: bool,
 }
 
 impl Default for SaveEditorApp {
@@ -69,8 +83,17 @@ impl Default for SaveEditorApp {
             selected_catalog_item: None,
             add_item_count: 1,
             add_item_upgrade: 0,
+            skilltree_catalog: None,
+            skilltree_texture: None,
+            skilltree_zoom: 0.5,
+            skilltree_scroll: egui::Vec2::ZERO,
+            selected_skill_node: None,
+            skilltree_catalog_error: None,
+            skilltree_texture_error: None,
+            skilltree_centered: false,
+            stats_dirty: true,
         };
-        // Try to load catalogs if game path is set
+
         if let Some(game_path) = &app.config.game_path {
             match load_loot_catalog(game_path) {
                 Ok(cat) => app.catalog = Some(cat),
@@ -80,6 +103,11 @@ impl Default for SaveEditorApp {
                 Ok(cat) => app.monster_catalog = Some(cat),
                 Err(e) => app.monster_catalog_error = Some(e),
             }
+            match load_skilltree_catalog(game_path) {
+                Ok(cat) => app.skilltree_catalog = Some(cat),
+                Err(e) => app.skilltree_catalog_error = Some(e),
+            }
+            // Textures will be loaded later when needed or when user sets folder again
         }
         app
     }
@@ -119,7 +147,7 @@ impl SaveEditorApp {
         }
     }
 
-    pub fn set_game_path(&mut self, path: PathBuf) {
+    pub fn set_game_path(&mut self, path: PathBuf, ctx: &egui::Context) {
         self.config.game_path = Some(path.clone());
         self.config.save();
         // Reload loot catalog
@@ -144,13 +172,37 @@ impl SaveEditorApp {
                 self.monster_catalog_error = Some(e);
             }
         }
+        // Load skill tree catalog
+        match load_skilltree_catalog(&path) {
+            Ok(cat) => {
+                self.skilltree_catalog = Some(cat);
+                self.skilltree_catalog_error = None;
+            }
+            Err(e) => {
+                self.skilltree_catalog = None;
+                self.skilltree_catalog_error = Some(e);
+            }
+        }
+        // Load skill tree texture
+        // Happens now when opening the ui if not loaded
+        //match load_skilltree_texture(&path, ctx) {
+        //    Ok(tex) => {
+        //        self.skilltree_texture = Some(tex);
+        //        self.skilltree_texture_error = None;
+        //    }
+        //    Err(e) => {
+        //        self.skilltree_texture = None;
+        //        self.skilltree_texture_error = Some(e);
+        //    }
+        //}
         // Atlas will be loaded lazily in update
         self.item_atlas = None;
+        self.skilltree_centered = false;
     }
 
-    pub fn choose_game_folder(&mut self) {
+    pub fn choose_game_folder(&mut self, ctx: &egui::Context) {
         if let Some(folder) = FileDialog::new().pick_folder() {
-            self.set_game_path(folder);
+            self.set_game_path(folder, ctx);
         }
     }
 
@@ -176,8 +228,72 @@ impl SaveEditorApp {
         }
     }
 
+    /// Recalculates the nine primary stats from the skill tree unlocks.
+    /// This exactly mimics the game's PlayerStats.UpdateStats() for all node types.
+    fn recalc_player_stats(save: &mut SaveData, catalog: &SkillTreeCatalog) {
+        // Reset all stats to base 5 (as in UpdateStats)
+        for stat in &mut save.stats.stats {
+            *stat = 5;
+        }
+
+        for node in &catalog.nodes {
+            let unlocked = save.stats.tree_unlocks[node.id] > 0
+                || save.stats.class_unlocks.contains(&(node.id as i32));
+            if !unlocked {
+                continue;
+            }
+
+            match node.node_type {
+                // Stat nodes (0..8)
+                0..=8 => {
+                    let stat_idx = node.node_type as usize;
+                    if node.value > 1 {
+                        // Fixed‑value node (e.g., +2 or +3)
+                        save.stats.stats[stat_idx] += node.value;
+                    } else {
+                        // Multi‑level node: add the unlock count (at least 1)
+                        let add = if save.stats.tree_unlocks[node.id] > 0 {
+                            save.stats.tree_unlocks[node.id]
+                        } else {
+                            1
+                        };
+                        save.stats.stats[stat_idx] += add;
+                    }
+                }
+                // Weapon/glyph nodes – they add `cost` to specific stats
+                // Based on the decompiled C# switch:
+                // case 9,20,23,29 -> Strength
+                // case 10,22,30 -> Will
+                // case 11,16 -> Vitality
+                // case 12,13,15,19 -> Dexterity
+                // case 14,28 -> Conviction
+                // case 17,27 -> Arcana
+                // case 18,25,26 -> Endurance
+                // case 21 -> Resolve
+                // case 24,31 -> Luck
+                9 | 20 | 23 | 29 => save.stats.stats[0] += node.cost,
+                10 | 22 | 30 => save.stats.stats[3] += node.cost,
+                11 | 16 => save.stats.stats[2] += node.cost,
+                12 | 13 | 15 | 19 => save.stats.stats[1] += node.cost,
+                14 | 28 => save.stats.stats[6] += node.cost,
+                17 | 27 => save.stats.stats[5] += node.cost,
+                18 | 25 | 26 => save.stats.stats[4] += node.cost,
+                21 => save.stats.stats[7] += node.cost,
+                24 | 31 => save.stats.stats[8] += node.cost,
+                _ => {} // Other types (should not exist) ignored
+            }
+        }
+    }
+
     pub fn show_stats_ui(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
-        ui.heading("Stats");
+        if self.stats_dirty {
+            if let Some(catalog) = &self.skilltree_catalog {
+                SaveEditorApp::recalc_player_stats(save, catalog);
+            }
+            self.stats_dirty = false;
+        }
+
+        ui.heading("Player Stats");
         ui.separator();
         ui.horizontal(|ui| {
             ui.label("Player Name:");
@@ -199,6 +315,43 @@ impl SaveEditorApp {
             ui.label("Time Played (seconds):");
             ui.add(egui::DragValue::new(&mut save.stats.time_played).speed(1.0).range(0.0..=1e9));
         });
+        ui.horizontal(|ui| {
+            ui.label("Hazeburnt:");
+            ui.checkbox(&mut save.stats.hazeburnt, "");
+        });
+
+        ui.separator();
+        ui.heading("Attributes (from skill tree)");
+        ui.label("Visit skill tree tab to edit stats");
+        ui.separator();
+
+        let stat_names = [
+            "Strength",
+            "Dexterity",
+            "Vitality",
+            "Will",
+            "Endurance",
+            "Arcana",
+            "Conviction",
+            "Resolve",
+            "Luck",
+        ];
+
+        Grid::new("stats_grid")
+            .num_columns(2)
+            .spacing([40.0, 8.0])
+            .striped(true)
+            .show(ui, |ui| {
+                for (i, name) in stat_names.iter().enumerate() {
+                    let value = &mut save.stats.stats[i];
+                    ui.label(format!("{}: {}", name, value));
+                    // game recalcs based on skill tree
+                    //ui.add(egui::DragValue::new(value).speed(1).range(0..=100));
+                    ui.end_row();
+                }
+            });
+
+        ui.separator();
     }
 
     pub fn show_equipment_ui(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
@@ -230,17 +383,17 @@ impl SaveEditorApp {
         }
     }
 
-    fn get_icon_uv(&self, def: &LootDef, atlas: Option<&TextureHandle>, atlas_width: f32, atlas_height: f32) -> Option<egui::Rect> {
+    fn get_icon_uv(&self, def: &LootDef, atlas: Option<&TextureHandle>, atlas_width: f32, atlas_height: f32) -> Option<Rect> {
         let icon_uv = if def.img >= 0 && atlas.is_some() {
             let x = (def.img as u32 % 32) * 128;
             let y = (def.img as u32 / 32) * 128;
 
-            Some(egui::Rect::from_min_max(
-                egui::pos2(
+            Some(Rect::from_min_max(
+                pos2(
                     x as f32 / atlas_width,
                     y as f32 / atlas_height,
                 ),
-                egui::pos2(
+                pos2(
                     (x + 128) as f32 / atlas_width,
                     (y + 128) as f32 / atlas_height,
                 ),
@@ -249,6 +402,22 @@ impl SaveEditorApp {
             None
         };
         icon_uv
+    }
+
+    pub fn draw_image_button(ui: &mut egui::Ui, icon_uv: Option<Rect>, atlas: Option<&TextureHandle>) -> Response {
+        let response = if let Some(uv) = icon_uv {
+            ui.add(
+                egui::Button::image(
+                    egui::Image::from_texture(atlas.unwrap())
+                        .fit_to_exact_size(egui::vec2(48.0, 48.0))
+                        .uv(uv),
+                )
+            )
+        } else {
+            ui.add_space(48.0);
+            ui.allocate_response(egui::vec2(48.0, 48.0), egui::Sense::click())
+        };
+        response
     }
 
     fn show_inventory_or_stockpile(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
@@ -313,7 +482,7 @@ impl SaveEditorApp {
                                 grouped.entry(cat).or_default().push(orig_idx);
                             }
 
-                            let mut to_remove: Vec<usize> = Vec::new();
+                            //let mut to_remove: Vec<usize> = Vec::new();
 
                             let mut categories: Vec<_> = grouped.keys().cloned().collect();
                             categories.sort();
@@ -347,19 +516,7 @@ impl SaveEditorApp {
                                             };
 
                                             ui.vertical(|ui| {
-                                                // Image as button
-                                                let response = if let Some(uv) = icon_uv {
-                                                    ui.add(
-                                                        egui::Button::image(
-                                                            egui::Image::from_texture(atlas.unwrap())
-                                                                .fit_to_exact_size(egui::vec2(48.0, 48.0))
-                                                                .uv(uv),
-                                                        )
-                                                    )
-                                                } else {
-                                                    ui.add_space(48.0);
-                                                    ui.allocate_response(egui::vec2(48.0, 48.0), egui::Sense::click())
-                                                };
+                                                let response = Self::draw_image_button(ui, icon_uv, atlas);
 
                                                 if response.clicked() {
                                                     clicked_item = Some(orig_idx);
@@ -391,20 +548,19 @@ impl SaveEditorApp {
                                 ui.add_space(8.0);
                             }
 
-                            if !to_remove.is_empty() {
-                                to_remove.sort_unstable_by(|a, b| b.cmp(a));
-                                for idx in to_remove {
-                                    items.remove(idx);
-
-                                    if let Some(sel) = selected_equipment_item_local {
-                                        if sel == idx {
-                                            selected_equipment_item_local = None;
-                                        } else if sel > idx {
-                                            selected_equipment_item_local = Some(sel - 1);
-                                        }
-                                    }
-                                }
-                            }
+                            //if !to_remove.is_empty() {
+                            //    to_remove.sort_unstable_by(|a, b| b.cmp(a));
+                            //    for idx in to_remove {
+                            //        items.remove(idx);
+                            //        if let Some(sel) = selected_equipment_item_local {
+                            //            if sel == idx {
+                            //                selected_equipment_item_local = None;
+                            //            } else if sel > idx {
+                            //                selected_equipment_item_local = Some(sel - 1);
+                            //            }
+                            //        }
+                            //    }
+                            //}
                         });
 
                     if let Some(idx) = clicked_item {
@@ -517,19 +673,7 @@ impl SaveEditorApp {
                                             let icon_uv = self.get_icon_uv(def, atlas, atlas_width as f32, atlas_height as f32);
 
                                             ui.vertical(|ui| {
-                                                // Image as button
-                                                let response = if let Some(uv) = icon_uv {
-                                                    ui.add(
-                                                        egui::Button::image(
-                                                            egui::Image::from_texture(atlas.unwrap())
-                                                                .fit_to_exact_size(egui::vec2(48.0, 48.0))
-                                                                .uv(uv),
-                                                        )
-                                                    )
-                                                } else {
-                                                    ui.add_space(48.0);
-                                                    ui.allocate_response(egui::vec2(48.0, 48.0), egui::Sense::click())
-                                                };
+                                                let response = Self::draw_image_button(ui, icon_uv, atlas);
 
                                                 if response.clicked() {
                                                     clicked_item = Some(*idx);
@@ -732,6 +876,21 @@ impl SaveEditorApp {
         ui.label("Flags preserved across NG cycles: v$t_AREA_NOWHERE, dawnlight_saved, shroud_saved, blueheart_saved, oath_saved, sheriff_saved, chaos_saved. The flag \"$1ntr0\" is automatically added if missing.");
     }
 
+    pub fn add_bestiary_details(ui: &mut egui::Ui, beast: &mut BestiaryBeast) {
+        ui.horizontal(|ui| {
+            ui.label("Kills:");
+            ui.add(egui::DragValue::new(&mut beast.kills).speed(1).range(0..=9999));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Deaths:");
+            ui.add(egui::DragValue::new(&mut beast.deaths).speed(1).range(0..=9999));
+        });
+        ui.label("Drops:");
+        for (drop_idx, drop) in beast.drops.iter_mut().enumerate() {
+            ui.checkbox(drop, format!("Drop {}", drop_idx));
+        }
+    }
+
     pub fn show_bestiary_ui(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
         ui.heading("Bestiary");
         ui.separator();
@@ -747,37 +906,11 @@ impl SaveEditorApp {
                             .get(idx)
                             .map(|m| m.name.clone())
                             .unwrap_or_else(|| format!("Beast {}", idx));
-                        ui.collapsing(format!("{} (ID: {})", name, idx), |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label("Kills:");
-                                ui.add(egui::DragValue::new(&mut beast.kills).speed(1).range(0..=9999));
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Deaths:");
-                                ui.add(egui::DragValue::new(&mut beast.deaths).speed(1).range(0..=9999));
-                            });
-                            ui.label("Drops:");
-                            for (drop_idx, drop) in beast.drops.iter_mut().enumerate() {
-                                ui.checkbox(drop, format!("Drop {}", drop_idx));
-                            }
-                        });
+                        ui.collapsing(format!("{} (ID: {})", name, idx), |ui| SaveEditorApp::add_bestiary_details(ui, beast));
                     }
                 } else {
                     for (idx, beast) in save.bestiary.beasts.iter_mut().enumerate() {
-                        ui.collapsing(format!("Beast {}", idx), |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label("Kills:");
-                                ui.add(egui::DragValue::new(&mut beast.kills).speed(1).range(0..=9999));
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Deaths:");
-                                ui.add(egui::DragValue::new(&mut beast.deaths).speed(1).range(0..=9999));
-                            });
-                            ui.label("Drops:");
-                            for (drop_idx, drop) in beast.drops.iter_mut().enumerate() {
-                                ui.checkbox(drop, format!("Drop {}", drop_idx));
-                            }
-                        });
+                        ui.collapsing(format!("Beast {}", idx), |ui| SaveEditorApp::add_bestiary_details(ui, beast));
                     }
                     if let Some(err) = &self.monster_catalog_error {
                         ui.colored_label(egui::Color32::RED, format!("Monster catalog error: {}", err));
@@ -845,6 +978,345 @@ impl SaveEditorApp {
             });
         }
     }
+
+    pub fn export_textures(&self) {
+        use std::fs;
+        use std::path::PathBuf;
+        use image::ImageFormat;
+
+        let game_path = match &self.config.game_path {
+            Some(p) => p,
+            None => {
+                eprintln!("Game folder not set");
+                return;
+            }
+        };
+
+        // Create exports directory
+        let export_dir = PathBuf::from("exports");
+        if let Err(e) = fs::create_dir_all(&export_dir) {
+            eprintln!("Failed to create exports directory: {}", e);
+            return;
+        }
+
+        // Export interface.xnb
+        let interface_path = game_path.join("Content").join("gfx").join("interface.xnb");
+        if interface_path.exists() {
+            match sas2_save::xnb_loader::load_texture_from_xnb(interface_path.to_str().unwrap()) {
+                Ok(img) => {
+                    let output_path = export_dir.join("interface.png");
+                    if let Err(e) = img.save_with_format(output_path, ImageFormat::Png) {
+                        eprintln!("Failed to save interface.png: {}", e);
+                    } else {
+                        println!("Saved interface.png");
+                    }
+                }
+                Err(e) => eprintln!("Failed to load interface.xnb: {}", e),
+            }
+        } else {
+            eprintln!("interface.xnb not found at {:?}", interface_path);
+        }
+    }
+
+    pub fn show_skilltree_ui(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
+        ui.heading("Skill Tree");
+        ui.separator();
+
+        // Ensure texture/catalog are loaded
+        if self.skilltree_texture.is_none() && self.skilltree_catalog.is_some() {
+            if let Some(game_path) = &self.config.game_path {
+                if let Ok(tex) = load_skilltree_texture(game_path, ui.ctx()) {
+                    self.skilltree_texture = Some(tex);
+                }
+            }
+        }
+
+        let catalog = match &self.skilltree_catalog {
+            Some(c) => c,
+            None => {
+                ui.label("Skill tree catalog not loaded.");
+                if let Some(err) = &self.skilltree_catalog_error {
+                    ui.colored_label(egui::Color32::RED, format!("Error: {}", err));
+                }
+                return;
+            }
+        };
+
+        let texture = match &self.skilltree_texture {
+            Some(t) => t,
+            None => {
+                ui.label("Skill tree texture not loaded.");
+                if let Some(err) = &self.skilltree_texture_error {
+                    ui.colored_label(egui::Color32::RED, format!("Error: {}", err));
+                }
+                return;
+            }
+        };
+
+        let total_height = ui.available_height();
+
+        // Zoom controls
+        ui.horizontal(|ui| {
+            ui.label("Zoom:");
+            ui.add(egui::Slider::new(&mut self.skilltree_zoom, 0.2..=1.5).logarithmic(true));
+            if ui.button("Reset View").clicked() {
+                self.skilltree_zoom = 0.5;
+                self.skilltree_centered = false; // Force re-center on next frame
+            }
+        });
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            let panel_width = 280.0;
+            let canvas_width = (ui.available_width() - panel_width - 10.0).max(0.0);
+
+            let (response, painter) = ui.allocate_painter(
+                egui::vec2(canvas_width, total_height),
+                egui::Sense::click_and_drag(),
+            );
+            let canvas_rect = response.rect;
+
+            // Auto-center the view on first view
+            if !self.skilltree_centered {
+                let mut min_x = f32::MAX;
+                let mut max_x = f32::MIN;
+                let mut min_y = f32::MAX;
+                let mut max_y = f32::MIN;
+                for node in &catalog.nodes {
+                    min_x = min_x.min(node.loc_x);
+                    max_x = max_x.max(node.loc_x);
+                    min_y = min_y.min(node.loc_y);
+                    max_y = max_y.max(node.loc_y);
+                }
+                let world_center = egui::vec2((min_x + max_x) / 2.0, (min_y + max_y) / 2.0);
+                let canvas_center = canvas_rect.center();
+                // screen = (world - scroll) * zoom + canvas.min
+                // solve for scroll: canvas_center = (world_center - scroll) * zoom + canvas.min
+                // => world_center - scroll = (canvas_center - canvas.min) / zoom
+                // => scroll = world_center - (canvas_center - canvas.min) / zoom
+                self.skilltree_scroll = world_center - (canvas_center - canvas_rect.min) / self.skilltree_zoom;
+                self.skilltree_centered = true;
+            }
+
+            // Panning
+            if response.dragged() {
+                self.skilltree_scroll -= response.drag_delta() / self.skilltree_zoom;
+            }
+
+            // Zoom Logic
+            if response.hovered() {
+                let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+                if scroll != 0.0 {
+                    let old_zoom = self.skilltree_zoom;
+                    self.skilltree_zoom = (self.skilltree_zoom * (1.0 + scroll * 0.001)).clamp(0.2, 1.5);
+                    let mouse = response.hover_pos().unwrap_or(canvas_rect.center());
+                    let world_before = (mouse - canvas_rect.min) / old_zoom + self.skilltree_scroll;
+                    let world_after = (mouse - canvas_rect.min) / self.skilltree_zoom + self.skilltree_scroll;
+                    self.skilltree_scroll += world_before - world_after;
+                }
+            }
+
+            let to_screen = |x: f32, y: f32| {
+                pos2(
+                    canvas_rect.min.x + (x - self.skilltree_scroll.x) * self.skilltree_zoom,
+                    canvas_rect.min.y + (y - self.skilltree_scroll.y) * self.skilltree_zoom,
+                )
+            };
+
+            // Draw connections
+            for node in &catalog.nodes {
+                let start = to_screen(node.loc_x, node.loc_y);
+                for &parent_id in &node.parents {
+                    if parent_id >= 0 {
+                        if let Some(parent) = catalog.nodes.get(parent_id as usize) {
+                            let end = to_screen(parent.loc_x, parent.loc_y);
+                            let node_unlocked = save.stats.tree_unlocks[node.id] > 0 || save.stats.class_unlocks.contains(&(node.id as i32));
+                            let parent_unlocked = save.stats.tree_unlocks[parent_id as usize] > 0 || save.stats.class_unlocks.contains(&(parent_id));
+                            let line_color = if node_unlocked && parent_unlocked {
+                                egui::Color32::from_rgb(255, 215, 0)
+                            } else if node_unlocked || parent_unlocked {
+                                egui::Color32::from_rgb(100, 100, 200)
+                            } else {
+                                egui::Color32::from_gray(80)
+                            };
+                            painter.line_segment([start, end], (2.0 * self.skilltree_zoom, line_color));
+                        }
+                    }
+                }
+            }
+
+            let tex_size = texture.size_vec2();
+            let tile_size = 128.0;
+            let tiles_per_row = (tex_size.x / tile_size) as i32;
+
+            // Draw nodes
+            for node in &catalog.nodes {
+                let screen_pos = to_screen(node.loc_x, node.loc_y);
+                let base_icon_size = 64.0 * self.skilltree_zoom;
+                let zoom_out_factor = 1.0 + (0.5 - self.skilltree_zoom).max(0.0) * 0.8333;
+                let icon_display_size = base_icon_size * zoom_out_factor;
+                let rect = Rect::from_center_size(screen_pos, egui::vec2(icon_display_size, icon_display_size));
+
+                if !canvas_rect.intersects(rect) {
+                    continue;
+                }
+
+                let icon_idx = if node.node_type >= 0 && (node.node_type as usize) < SKILL_IMG.len() {
+                    SKILL_IMG[node.node_type as usize]
+                } else { 0 };
+
+                let tile_x = (icon_idx / tiles_per_row) as f32 * tile_size;
+                let tile_y = (icon_idx % tiles_per_row) as f32 * tile_size;
+                let uv = Rect::from_min_max(
+                    pos2(tile_x / tex_size.x, tile_y / tex_size.y),
+                    pos2((tile_x + tile_size) / tex_size.x, (tile_y + tile_size) / tex_size.y),
+                );
+
+                // Determine tint
+                let is_selected = self.selected_skill_node == Some(node.id);
+                let is_class_unlock = save.stats.class_unlocks.contains(&(node.id as i32));
+                let current_level = save.stats.tree_unlocks[node.id];
+                let max_level = node.max_unlock();
+                let is_max_level = max_level > 1 && current_level >= max_level;
+
+                let tint = if is_selected {
+                    egui::Color32::CYAN
+                } else if is_class_unlock {
+                    egui::Color32::YELLOW
+                } else if is_max_level {
+                    egui::Color32::LIGHT_YELLOW
+                } else if current_level > 0 {
+                    egui::Color32::WHITE
+                } else {
+                    egui::Color32::DARK_GRAY
+                };
+
+                painter.image(texture.id(), rect, uv, tint);
+
+                let node_response = ui.interact(rect, egui::Id::new(node.id), egui::Sense::click());
+                if node_response.clicked() {
+                    self.selected_skill_node = Some(node.id);
+                }
+
+                // Draw circles for multi-level nodes
+                if max_level > 1 {
+                    let max_allowed_width = icon_display_size;
+                    let mut circle_radius = (icon_display_size * 0.08).max(3.0);
+                    let mut spacing = circle_radius * 2.5;
+                    let mut total_width = (max_level - 1) as f32 * spacing;
+
+                    if total_width > max_allowed_width {
+                        spacing = max_allowed_width / (max_level - 1) as f32;
+                        circle_radius = (spacing * 0.4).max(1.5);
+                        total_width = (max_level - 1) as f32 * spacing;
+                    }
+
+                    let start_x = screen_pos.x - total_width / 2.0;
+                    let circle_y = screen_pos.y + icon_display_size * 0.55;
+
+                    for i in 0..max_level {
+                        let circle_x = start_x + i as f32 * spacing;
+                        let center = pos2(circle_x, circle_y);
+
+                        let fill_color = if i < current_level {
+                            egui::Color32::WHITE
+                        } else if is_max_level {
+                            egui::Color32::LIGHT_YELLOW
+                        } else {
+                            egui::Color32::DARK_GRAY
+                        };
+
+                        painter.circle_filled(center, circle_radius, fill_color);
+                        painter.circle_stroke(center, circle_radius, (1.0, egui::Color32::WHITE));
+                    }
+                }
+            }
+
+            // Side panel
+            ui.allocate_ui_with_layout(
+                egui::vec2(panel_width, total_height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    if let Some(id) = self.selected_skill_node {
+                        if let Some(node) = catalog.nodes.get(id) {
+                            ui.heading(&node.titles[0]);
+                            ui.add_space(4.0);
+                            ui.label(&node.descs[0]);
+                            ui.separator();
+
+                            ui.label(format!("Type: {}", node.stat_name().unwrap_or("Weapon/Glyph unlock")));
+                            ui.label(format!("Value: {}", node.value));
+                            ui.label(format!("Cost (pearls): {}", node.cost));
+
+                            let mut val = save.stats.tree_unlocks[node.id];
+                            ui.horizontal(|ui| {
+                                ui.label("Unlock level:");
+                                if ui.add(egui::DragValue::new(&mut val).range(0..=node.max_unlock()).speed(1)).changed() {
+                                    save.stats.tree_unlocks[node.id] = val;
+                                    SaveEditorApp::recalc_player_stats(save, catalog);
+                                }
+                            });
+
+                            ui.add_space(8.0);
+                            ui.label("Parents:");
+                            for &p in &node.parents {
+                                if p >= 0 {
+                                    if let Some(parent) = catalog.nodes.get(p as usize) {
+                                        ui.label(format!("- {}", parent.titles[0]));
+                                    }
+                                }
+                            }
+
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| {
+                                if ui.button("Set as Class Unlock 1").clicked() {
+                                    save.stats.class_unlocks[0] = node.id as i32;
+                                    SaveEditorApp::recalc_player_stats(save, catalog);
+                                }
+                            });
+                            ui.horizontal(|ui| {
+                                if ui.button("Set as Class Unlock 2").clicked() {
+                                    save.stats.class_unlocks[1] = node.id as i32;
+                                    SaveEditorApp::recalc_player_stats(save, catalog);
+                                }
+                            });
+                            ui.horizontal(|ui| {
+                                if ui.button("Set as Class Unlock 3").clicked() {
+                                    save.stats.class_unlocks[2] = node.id as i32;
+                                }
+                            });
+
+                            ui.add_space(8.0);
+                            if ui.button("Close Details").clicked() {
+                                self.selected_skill_node = None;
+                            }
+                        }
+                    } else {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(20.0);
+                            ui.label(egui::RichText::new("Select a node to edit").weak());
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new("Class Unlocks (always active)").strong());
+                            for i in 0..3 {
+                                let class_id = save.stats.class_unlocks[i];
+                                let name = if class_id >= 0 && (class_id as usize) < catalog.nodes.len() {
+                                    catalog.nodes[class_id as usize].titles[0].clone()
+                                } else {
+                                    "None".to_string()
+                                };
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("Slot {}: {}", i, name));
+                                    if ui.button("Clear").clicked() {
+                                        save.stats.class_unlocks[i] = -1;
+                                    }
+                                });
+                            }
+                        });
+                    }
+                },
+            );
+        });
+    }
 }
 
 impl eframe::App for SaveEditorApp {
@@ -864,7 +1336,11 @@ impl eframe::App for SaveEditorApp {
                 });
                 ui.menu_button("Settings", |ui| {
                     if ui.button("Set Game Folder").clicked() {
-                        self.choose_game_folder();
+                        self.choose_game_folder(ui.ctx());
+                        ui.close();
+                    }
+                    if ui.button("Export Textures (interface)").clicked() {
+                        self.export_textures();
                         ui.close();
                     }
                 });
@@ -873,11 +1349,10 @@ impl eframe::App for SaveEditorApp {
             // Show game folder status
             if let Some(game_path) = &self.config.game_path {
                 ui.label(format!("Game folder: {}", game_path.display()));
-                ui.label("(Expected subfolder: Loot/data/loot.zls and Monsters/data/monsters.zms)");
             } else {
                 ui.colored_label(egui::Color32::YELLOW, "Game folder not set (needed for item names, icons, and bestiary names)");
                 if ui.button("Set Game Folder").clicked() {
-                    self.choose_game_folder();
+                    self.choose_game_folder(ui.ctx());
                 }
             }
             if let Some(err) = &self.catalog_error {
@@ -901,6 +1376,7 @@ impl eframe::App for SaveEditorApp {
                         ui.selectable_value(&mut self.active_tab, Tab::Flags, "Flags");
                         ui.selectable_value(&mut self.active_tab, Tab::Bestiary, "Bestiary");
                         ui.selectable_value(&mut self.active_tab, Tab::Cosmetics, "Cosmetics");
+                        ui.selectable_value(&mut self.active_tab, Tab::SkillTree, "Skill Tree");
                     });
                 });
 
@@ -911,6 +1387,7 @@ impl eframe::App for SaveEditorApp {
                     Tab::Flags => self.show_flags_ui(ui, save),
                     Tab::Bestiary => self.show_bestiary_ui(ui, save),
                     Tab::Cosmetics => self.show_cosmetics_ui(ui, save),
+                    Tab::SkillTree => self.show_skilltree_ui(ui, save),
                 }
             } else {
                 ui.label("No save file loaded. Click File -> Open to load a save.");
