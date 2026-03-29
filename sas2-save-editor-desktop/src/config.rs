@@ -10,7 +10,7 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn load() -> Self {
-        if let Some(proj_dirs) = ProjectDirs::from("com", "yourdomain", "SaS2SaveEditor") {
+        if let Some(proj_dirs) = ProjectDirs::from("com", "amione", "SaS2SaveEditor") {
             let config_file = proj_dirs.config_dir().join("config.json");
             if let Ok(data) = fs::read_to_string(&config_file) {
                 if let Ok(config) = serde_json::from_str(&data) {
@@ -22,7 +22,7 @@ impl AppConfig {
     }
 
     pub fn save(&self) {
-        if let Some(proj_dirs) = ProjectDirs::from("com", "yourdomain", "SaS2SaveEditor") {
+        if let Some(proj_dirs) = ProjectDirs::from("com", "amione", "SaS2SaveEditor") {
             let config_dir = proj_dirs.config_dir();
             if let Err(e) = fs::create_dir_all(config_dir) {
                 eprintln!("Failed to create config directory: {}", e);
