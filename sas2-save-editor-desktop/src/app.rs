@@ -147,7 +147,7 @@ impl SaveEditorApp {
         }
     }
 
-    pub fn set_game_path(&mut self, path: PathBuf, ctx: &egui::Context) {
+    pub fn set_game_path(&mut self, path: PathBuf) {
         self.config.game_path = Some(path.clone());
         self.config.save();
         // Reload loot catalog
@@ -200,9 +200,9 @@ impl SaveEditorApp {
         self.skilltree_centered = false;
     }
 
-    pub fn choose_game_folder(&mut self, ctx: &egui::Context) {
+    pub fn choose_game_folder(&mut self) {
         if let Some(folder) = FileDialog::new().pick_folder() {
-            self.set_game_path(folder, ctx);
+            self.set_game_path(folder);
         }
     }
 
@@ -1336,7 +1336,7 @@ impl eframe::App for SaveEditorApp {
                 });
                 ui.menu_button("Settings", |ui| {
                     if ui.button("Set Game Folder").clicked() {
-                        self.choose_game_folder(ui.ctx());
+                        self.choose_game_folder();
                         ui.close();
                     }
                     if ui.button("Export Textures (interface)").clicked() {
@@ -1352,7 +1352,7 @@ impl eframe::App for SaveEditorApp {
             } else {
                 ui.colored_label(egui::Color32::YELLOW, "Game folder not set (needed for item names, icons, and bestiary names)");
                 if ui.button("Set Game Folder").clicked() {
-                    self.choose_game_folder(ui.ctx());
+                    self.choose_game_folder();
                 }
             }
             if let Some(err) = &self.catalog_error {
