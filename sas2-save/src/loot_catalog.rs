@@ -86,12 +86,12 @@ impl LootDef {
         );
 
         let mut title = Vec::with_capacity(20);
-        for i in 0..20 {
+        for _i in 0..20 {
             let s = read_string(reader)?;
             #[cfg(debug_assertions)]
             eprintln!(
                 "    title[{}]: \"{}\" at pos {}",
-                i,
+                _i,
                 s,
                 reader.stream_position()?
             );
@@ -99,12 +99,12 @@ impl LootDef {
         }
 
         let mut description = Vec::with_capacity(20);
-        for i in 0..20 {
+        for _i in 0..20 {
             let s = read_string(reader)?;
             #[cfg(debug_assertions)]
             eprintln!(
                 "    desc[{}]: \"{}\" at pos {}",
-                i,
+                _i,
                 s,
                 reader.stream_position()?
             );
@@ -162,11 +162,11 @@ impl LootDef {
             reader.stream_position()?
         );
         let mut fields = Vec::with_capacity(field_count as usize);
-        for i in 0..field_count {
+        for _i in 0..field_count {
         #[cfg(debug_assertions)]
             eprintln!(
                 "    reading field {} at pos {}",
-                i,
+                _i,
                 reader.stream_position()?
             );
             fields.push(LootField::read(reader)?);
@@ -180,12 +180,12 @@ impl LootDef {
             reader.stream_position()?
         );
         let mut flags = Vec::with_capacity(flag_count as usize);
-        for i in 0..flag_count {
+        for _i in 0..flag_count {
             let flag = reader.read_i32::<LittleEndian>()?;
             #[cfg(debug_assertions)]
             eprintln!(
                 "    flag[{}]: {} at pos {}",
-                i,
+                _i,
                 flag,
                 reader.stream_position()?
             );

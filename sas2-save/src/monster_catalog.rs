@@ -1,7 +1,9 @@
 use crate::utils::{read_string, SaveError};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::collections::HashMap;
-use std::io::{Cursor, Read, Seek};
+use std::io::{Read, Cursor};
+#[cfg(debug_assertions)]
+use std::io::Seek;
 use std::fs;
 use std::path::Path;
 
