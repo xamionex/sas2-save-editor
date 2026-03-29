@@ -1395,10 +1395,10 @@ impl eframe::App for SaveEditorApp {
                     ui.horizontal(|ui| {
                         ui.selectable_value(&mut self.active_tab, Tab::Stats, "Stats");
                         ui.selectable_value(&mut self.active_tab, Tab::Equipment, "Equipment");
+                        ui.selectable_value(&mut self.active_tab, Tab::SkillTree, "Skill Tree");
+                        ui.selectable_value(&mut self.active_tab, Tab::Cosmetics, "Cosmetics");
                         ui.selectable_value(&mut self.active_tab, Tab::Flags, "Flags");
                         ui.selectable_value(&mut self.active_tab, Tab::Bestiary, "Bestiary");
-                        ui.selectable_value(&mut self.active_tab, Tab::Cosmetics, "Cosmetics");
-                        ui.selectable_value(&mut self.active_tab, Tab::SkillTree, "Skill Tree");
                     });
                 });
 
@@ -1406,10 +1406,10 @@ impl eframe::App for SaveEditorApp {
                 match self.active_tab {
                     Tab::Stats => self.show_stats_ui(ui, save),
                     Tab::Equipment => self.show_equipment_ui(ui, save),
+                    Tab::SkillTree => self.show_skilltree_ui(ui, save),
+                    Tab::Cosmetics => self.show_cosmetics_ui(ui, save),
                     Tab::Flags => self.show_flags_ui(ui, save),
                     Tab::Bestiary => self.show_bestiary_ui(ui, save),
-                    Tab::Cosmetics => self.show_cosmetics_ui(ui, save),
-                    Tab::SkillTree => self.show_skilltree_ui(ui, save),
                 }
             } else {
                 ui.label("No save file loaded. Click File -> Open to load a save.");
