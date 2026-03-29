@@ -11,6 +11,23 @@ use sas2_save::skilltree::{SkillTreeCatalog, SKILL_IMG};
 use sas2_save::{loot_names, BestiaryBeast, Item, SaveData};
 use std::fs;
 use std::path::{Path, PathBuf};
+use image::ImageFormat;
+
+#[derive(Clone)]
+pub struct XnbNode {
+    pub name: String,
+    pub path: PathBuf,
+    pub is_dir: bool,
+    pub children: Vec<XnbNode>,
+    pub selected: bool,
+}
+
+pub struct ExportState {
+    pub progress: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    pub total: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub done: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
 
 #[derive(PartialEq)]
 pub enum Tab {
@@ -60,6 +77,12 @@ pub struct SaveEditorApp {
     pub skilltree_texture_error: Option<String>,
     pub skilltree_centered: bool,
     pub stats_dirty: bool,
+
+    // exporter
+    pub export_picker: Option<XnbNode>,
+    pub export_picker_open: bool,
+    pub export_state: Option<ExportState>,
+    pub export_overwrite: bool,
 }
 
 impl Default for SaveEditorApp {
@@ -92,6 +115,10 @@ impl Default for SaveEditorApp {
             skilltree_texture_error: None,
             skilltree_centered: false,
             stats_dirty: true,
+            export_state: None,
+            export_picker: None,
+            export_picker_open: false,
+            export_overwrite: false,
         };
 
         if let Some(game_path) = &app.config.game_path {
@@ -979,43 +1006,164 @@ impl SaveEditorApp {
         }
     }
 
-    pub fn export_textures(&self) {
-        use std::fs;
-        use std::path::PathBuf;
-        use image::ImageFormat;
+    pub fn start_export_job(&mut self, files: Vec<PathBuf>, overwrite: bool) {
+        let game_path = self.config.game_path.clone().unwrap();
 
+        use std::sync::{
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+            Arc,
+        };
+
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let progress = Arc::new(AtomicUsize::new(0));
+        let total = Arc::new(AtomicUsize::new(files.len()));
+        let done = Arc::new(AtomicBool::new(false));
+
+        self.export_state = Some(ExportState {
+            progress: progress.clone(),
+            total: total.clone(),
+            cancel: cancel_flag.clone(),
+            done: done.clone(),
+        });
+
+        let overwrite_flag = overwrite;
+
+        std::thread::spawn(move || {
+            let export_root = PathBuf::from("exports");
+            let _ = fs::create_dir_all(&export_root);
+
+            files.iter().for_each(|path| {
+                if cancel_flag.load(Ordering::Relaxed) {
+                    return;
+                }
+
+                let relative = path.strip_prefix(&game_path).unwrap_or(path);
+
+                let mut out_path = export_root.join(relative);
+                out_path.set_extension("png");
+
+                // SKIP if already exported
+                if !overwrite_flag && out_path.exists() {
+                    progress.fetch_add(1, Ordering::Relaxed);
+                    return;
+                }
+
+                match sas2_save::xnb_loader::load_texture_from_xnb(path.to_str().unwrap()) {
+                    Ok(img) => {
+                        if let Some(parent) = out_path.parent() {
+                            let _ = fs::create_dir_all(parent);
+                        }
+
+                        if let Err(e) = img.save_with_format(&out_path, ImageFormat::Png) {
+                            eprintln!("Failed to save {:?}: {}", out_path, e);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to load {:?}: {}", path, e);
+                    }
+                }
+
+                progress.fetch_add(1, Ordering::Relaxed);
+            });
+
+            done.store(true, Ordering::Relaxed);
+        });
+    }
+
+    fn collect_selected(node: &XnbNode, out: &mut Vec<PathBuf>, parent_selected: bool) {
+        let effective_selected = parent_selected && node.selected;
+
+        if node.is_dir {
+            for c in &node.children {
+                Self::collect_selected(c, out, effective_selected);
+            }
+        } else if effective_selected {
+            out.push(node.path.clone());
+        }
+    }
+
+    fn draw_xnb_tree(ui: &mut egui::Ui, node: &mut XnbNode) {
+        if node.is_dir {
+            // Create a unique ID for this header's state
+            let id = ui.make_persistent_id(&node.name);
+            let state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false);
+
+            // Build the header UI
+            state.show_header(ui, |ui| {
+                if ui.checkbox(&mut node.selected, &node.name).changed() {
+                    let val = node.selected;
+                    fn propagate(n: &mut XnbNode, val: bool) {
+                        n.selected = val;
+                        for c in &mut n.children {
+                            propagate(c, val);
+                        }
+                    }
+                    propagate(node, val);
+                }
+            })
+                .body(|ui| {
+                    // Draw children inside the body
+                    for child in &mut node.children {
+                        Self::draw_xnb_tree(ui, child);
+                    }
+                });
+        } else {
+            ui.checkbox(&mut node.selected, &node.name);
+        }
+    }
+
+    pub fn export_textures(&mut self) {
         let game_path = match &self.config.game_path {
-            Some(p) => p,
+            Some(p) => p.clone(),
             None => {
                 eprintln!("Game folder not set");
                 return;
             }
         };
 
-        // Create exports directory
-        let export_dir = PathBuf::from("exports");
-        if let Err(e) = fs::create_dir_all(&export_dir) {
-            eprintln!("Failed to create exports directory: {}", e);
-            return;
-        }
+        fn build_tree(path: &Path) -> Option<XnbNode> {
+            let mut node = XnbNode {
+                name: path.file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.display().to_string()),
+                path: path.to_path_buf(),
+                is_dir: path.is_dir(),
+                children: Vec::new(),
+                selected: true,
+            };
 
-        // Export interface.xnb
-        let interface_path = game_path.join("Content").join("gfx").join("interface.xnb");
-        if interface_path.exists() {
-            match sas2_save::xnb_loader::load_texture_from_xnb(interface_path.to_str().unwrap()) {
-                Ok(img) => {
-                    let output_path = export_dir.join("interface.png");
-                    if let Err(e) = img.save_with_format(output_path, ImageFormat::Png) {
-                        eprintln!("Failed to save interface.png: {}", e);
-                    } else {
-                        println!("Saved interface.png");
+            if path.is_dir() {
+                if let Ok(read) = fs::read_dir(path) {
+                    for entry in read.flatten() {
+                        let p = entry.path();
+                        if p.is_dir() {
+                            if let Some(child) = build_tree(&p) {
+                                if !child.children.is_empty() {
+                                    node.children.push(child);
+                                }
+                            }
+                        } else if p.extension().map(|e| e.eq_ignore_ascii_case("xnb")).unwrap_or(false) {
+                            node.children.push(XnbNode {
+                                name: p.file_name().unwrap().to_string_lossy().to_string(),
+                                path: p,
+                                is_dir: false,
+                                children: vec![],
+                                selected: true,
+                            });
+                        }
                     }
                 }
-                Err(e) => eprintln!("Failed to load interface.xnb: {}", e),
             }
-        } else {
-            eprintln!("interface.xnb not found at {:?}", interface_path);
+
+            if node.is_dir && node.children.is_empty() {
+                None
+            } else {
+                Some(node)
+            }
         }
+
+        self.export_picker = build_tree(&game_path);
+        self.export_picker_open = true;
     }
 
     pub fn show_skilltree_ui(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
@@ -1263,7 +1411,7 @@ impl SaveEditorApp {
                         if let Some(node) = catalog.nodes.get(id) {
                             ui.heading(&node.titles[0]);
                             ui.add_space(4.0);
-                            ui.label(&node.descs[0]);
+                            ui.label(&node.descriptions[0]);
                             ui.separator();
 
                             ui.label(format!("Type: {}", node.stat_name().unwrap_or("Weapon/Glyph unlock")));
@@ -1419,6 +1567,92 @@ impl eframe::App for SaveEditorApp {
 
             if let Some(err) = &self.error_message {
                 ui.colored_label(egui::Color32::RED, err);
+            }
+
+            if let Some(state) = self.export_state.as_ref() {
+                let progress = state.progress.load(std::sync::atomic::Ordering::Relaxed);
+                let total = state.total.load(std::sync::atomic::Ordering::Relaxed);
+                let done = state.done.load(std::sync::atomic::Ordering::Relaxed);
+
+                let cancel = state.cancel.clone();
+
+                let mut should_cancel = false;
+                let mut should_close = false;
+
+                egui::Window::new("Exporting XNB Textures")
+                    .collapsible(false)
+                    .resizable(false)
+                    .show(ui.ctx(), |ui| {
+                        let fraction = if total > 0 {
+                            progress as f32 / total as f32
+                        } else {
+                            0.0
+                        };
+
+                        ui.add(egui::ProgressBar::new(fraction).show_percentage());
+                        ui.label(format!("{}/{} files exported", progress, total));
+
+                        if !done {
+                            if ui.button("Cancel").clicked() {
+                                should_cancel = true;
+                            }
+                        } else {
+                            ui.label("Done ✅");
+                            if ui.button("Close").clicked() {
+                                should_close = true;
+                            }
+                        }
+                    });
+
+                if should_cancel {
+                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+
+                if should_close {
+                    self.export_state = None;
+                }
+            }
+
+            if self.export_picker_open {
+                let mut start_export = false;
+
+                egui::Window::new("Select XNB files to export")
+                    .resizable(true)
+                    .vscroll(true)
+                    .show(ui.ctx(), |ui| {
+                        if let Some(root) = &mut self.export_picker {
+                            ScrollArea::vertical().show(ui, |ui| {
+                                Self::draw_xnb_tree(ui, root);
+                            });
+                        }
+
+                        ui.separator();
+
+                        ui.horizontal(|ui| {
+                            if ui.button("Start Export").clicked() {
+                                start_export = true;
+                            }
+                            if ui.button("Cancel").clicked() {
+                                self.export_picker_open = false;
+                            }
+                        });
+
+                        ui.separator();
+
+                        ui.checkbox(&mut self.export_overwrite, "Overwrite existing PNGs");
+                    });
+
+                if start_export {
+                    if let Some(root) = &self.export_picker {
+                        let mut files = Vec::new();
+                        Self::collect_selected(root, &mut files, true);
+
+                        self.start_export_job(files, self.export_overwrite);
+                    }
+
+                    self.export_picker_open = false;
+                    self.export_picker = None;
+                }
             }
         });
     }

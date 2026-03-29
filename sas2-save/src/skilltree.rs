@@ -7,8 +7,8 @@ pub struct SkillNode {
     pub id: usize,
     pub name: String,
     pub titles: Vec<String>,        // 13 languages
-    pub descs: Vec<String>,         // 13 languages
-    pub base_descs: Vec<String>,    // 13 languages
+    pub descriptions: Vec<String>,         // 13 languages
+    pub base_descriptions: Vec<String>,    // 13 languages
     pub node_type: i32,
     pub value: i32,
     pub cost: i32,
@@ -62,14 +62,14 @@ impl SkillTreeCatalog {
                 titles.push(read_string(&mut reader).map_err(|e| e.to_string())?);
             }
 
-            let mut descs = Vec::with_capacity(13);
+            let mut descriptions = Vec::with_capacity(13);
             for _ in 0..13 {
-                descs.push(read_string(&mut reader).map_err(|e| e.to_string())?);
+                descriptions.push(read_string(&mut reader).map_err(|e| e.to_string())?);
             }
 
-            let mut base_descs = Vec::with_capacity(13);
+            let mut base_descriptions = Vec::with_capacity(13);
             for _ in 0..13 {
-                base_descs.push(read_string(&mut reader).map_err(|e| e.to_string())?);
+                base_descriptions.push(read_string(&mut reader).map_err(|e| e.to_string())?);
             }
 
             let node_type = reader.read_i32::<LittleEndian>().map_err(|e| e.to_string())?;
@@ -88,8 +88,8 @@ impl SkillTreeCatalog {
                 id: id as usize,
                 name,
                 titles,
-                descs,
-                base_descs,
+                descriptions,
+                base_descriptions,
                 node_type,
                 value,
                 cost,
