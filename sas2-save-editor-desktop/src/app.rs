@@ -1,16 +1,16 @@
-use crate::config::AppConfig;
 use crate::catalog::{load_loot_catalog, load_monster_catalog, load_skilltree_catalog, load_skilltree_texture};
+use crate::config::AppConfig;
+use eframe::egui::{Grid, ScrollArea, TextureHandle};
 use eframe::{egui, Frame};
+use egui::{pos2, Rect, Response, Stroke};
 use rfd::FileDialog;
+use sas2_save::cosmetics::{AncestryCatalog, BeardCatalog, ClassCatalog, ColorCatalog, CrimeCatalog, EyeCatalog, HairCatalog, SexCatalog};
 use sas2_save::loot_catalog::{LootCatalog, LootDef};
 use sas2_save::monster_catalog::MonsterCatalog;
 use sas2_save::skilltree::{SkillTreeCatalog, SKILL_IMG};
-use sas2_save::{SaveData, Item, loot_names, BestiaryBeast};
+use sas2_save::{loot_names, BestiaryBeast, Item, SaveData};
 use std::fs;
 use std::path::{Path, PathBuf};
-use eframe::egui::{Grid, ScrollArea, TextureHandle};
-use egui::{pos2, Rect, Response};
-use sas2_save::cosmetics::{AncestryCatalog, BeardCatalog, ClassCatalog, ColorCatalog, CrimeCatalog, EyeCatalog, HairCatalog, SexCatalog};
 
 #[derive(PartialEq)]
 pub enum Tab {
@@ -301,7 +301,7 @@ impl SaveEditorApp {
         });
         ui.horizontal(|ui| {
             ui.label("Level:");
-            ui.add(egui::DragValue::new(&mut save.stats.level).speed(1).range(1..=100));
+            ui.add(egui::DragValue::new(&mut save.stats.level).speed(0.025).range(1..=100));
         });
         ui.horizontal(|ui| {
             ui.label("XP:");
@@ -786,10 +786,10 @@ impl SaveEditorApp {
 
         ui.horizontal(|ui| {
             ui.label("Count:");
-            ui.add(egui::DragValue::new(&mut item.count).range(0..=999));
+            ui.add(egui::DragValue::new(&mut item.count).speed(0.025).range(0..=999));
 
             ui.label("Upgrade:");
-            ui.add(egui::DragValue::new(&mut item.upgrade).range(0..=10));
+            ui.add(egui::DragValue::new(&mut item.upgrade).speed(0.025).range(0..=10));
         });
 
         ui.add_space(8.0);
@@ -858,11 +858,11 @@ impl SaveEditorApp {
         // Editable bounty data
         ui.horizontal(|ui| {
             ui.label("Bounty Seed:");
-            ui.add(egui::DragValue::new(&mut save.flags.bounty_seed).speed(1).range(0..=999999));
+            ui.add(egui::DragValue::new(&mut save.flags.bounty_seed).speed(0.025).range(0..=999999));
         });
         ui.horizontal(|ui| {
             ui.label("Bounties Complete (bitmask):");
-            ui.add(egui::DragValue::new(&mut save.flags.bounties_complete).speed(1).range(0..=999999));
+            ui.add(egui::DragValue::new(&mut save.flags.bounties_complete).speed(0.025).range(0..=999999));
         });
 
         // Recalculate NG level from flags after any edit
@@ -879,11 +879,11 @@ impl SaveEditorApp {
     pub fn add_bestiary_details(ui: &mut egui::Ui, beast: &mut BestiaryBeast) {
         ui.horizontal(|ui| {
             ui.label("Kills:");
-            ui.add(egui::DragValue::new(&mut beast.kills).speed(1).range(0..=9999));
+            ui.add(egui::DragValue::new(&mut beast.kills).speed(0.025).range(0..=9999));
         });
         ui.horizontal(|ui| {
             ui.label("Deaths:");
-            ui.add(egui::DragValue::new(&mut beast.deaths).speed(1).range(0..=9999));
+            ui.add(egui::DragValue::new(&mut beast.deaths).speed(0.025).range(0..=9999));
         });
         ui.label("Drops:");
         for (drop_idx, drop) in beast.drops.iter_mut().enumerate() {
@@ -973,7 +973,7 @@ impl SaveEditorApp {
                     ui.colored_label(egui::Color32::GRAY, format!("{}", *value));
                 } else {
                     // Fallback for unused slot
-                    ui.add(egui::DragValue::new(value).speed(1).range(0..=999));
+                    ui.add(egui::DragValue::new(value).speed(0.025).range(0..=999));
                 }
             });
         }
@@ -1058,7 +1058,7 @@ impl SaveEditorApp {
         // Zoom controls
         ui.horizontal(|ui| {
             ui.label("Zoom:");
-            ui.add(egui::Slider::new(&mut self.skilltree_zoom, 0.2..=1.5).logarithmic(true));
+            ui.add(egui::Slider::new(&mut self.skilltree_zoom, 0.2..=2.0).logarithmic(true));
             if ui.button("Reset View").clicked() {
                 self.skilltree_zoom = 0.5;
                 self.skilltree_centered = false; // Force re-center on next frame
@@ -1177,20 +1177,44 @@ impl SaveEditorApp {
                 let is_class_unlock = save.stats.class_unlocks.contains(&(node.id as i32));
                 let current_level = save.stats.tree_unlocks[node.id];
                 let max_level = node.max_unlock();
-                let is_max_level = max_level > 1 && current_level >= max_level;
+                let is_max_level = current_level >= max_level;
 
                 let tint = if is_selected {
                     egui::Color32::CYAN
                 } else if is_class_unlock {
-                    egui::Color32::YELLOW
+                    egui::Color32::from_rgb(255, 200, 50)
                 } else if is_max_level {
-                    egui::Color32::LIGHT_YELLOW
+                    egui::Color32::YELLOW
                 } else if current_level > 0 {
                     egui::Color32::WHITE
                 } else {
                     egui::Color32::DARK_GRAY
                 };
 
+                if is_class_unlock {
+                    let width = 2.0;
+                    painter.circle_stroke(rect.center(), icon_display_size, Stroke::new(width, tint));
+
+                    let rect_cent = rect.center();
+                    let offset = icon_display_size * std::f32::consts::FRAC_1_SQRT_2;
+
+                    let rect_rad_tl = pos2(rect_cent.x - offset, rect_cent.y - offset);
+                    let rect_rad_br = pos2(rect_cent.x + offset, rect_cent.y + offset);
+
+                    let rect_rad_tr = pos2(rect_cent.x + offset, rect_cent.y - offset);
+                    let rect_rad_bl = pos2(rect_cent.x - offset, rect_cent.y + offset);
+
+                    if node.id as i32 == save.stats.class_unlocks[0] {
+                        painter.line_segment([pos2(rect_cent.x - icon_display_size, rect_cent.y), pos2(rect_cent.x + icon_display_size, rect_cent.y)], Stroke::new(width, tint));
+                    } else if node.id as i32 == save.stats.class_unlocks[1] {
+                        painter.line_segment([rect_rad_tr, rect_rad_bl], Stroke::new(width, tint));
+                        painter.line_segment([rect_rad_tl, rect_rad_br], Stroke::new(width, tint));
+                    } else if node.id as i32 == save.stats.class_unlocks[2] {
+                        painter.line_segment([rect_rad_tr, rect_rad_bl], Stroke::new(width, tint));
+                        painter.line_segment([rect_rad_tl, rect_rad_br], Stroke::new(width, tint));
+                        painter.line_segment([pos2(rect_cent.x - icon_display_size, rect_cent.y), pos2(rect_cent.x + icon_display_size, rect_cent.y)], Stroke::new(width, tint));
+                    }
+                }
                 painter.image(texture.id(), rect, uv, tint);
 
                 let node_response = ui.interact(rect, egui::Id::new(node.id), egui::Sense::click());
@@ -1218,16 +1242,14 @@ impl SaveEditorApp {
                         let circle_x = start_x + i as f32 * spacing;
                         let center = pos2(circle_x, circle_y);
 
-                        let fill_color = if i < current_level {
-                            egui::Color32::WHITE
-                        } else if is_max_level {
-                            egui::Color32::LIGHT_YELLOW
+                        let fill_color = if is_max_level || i < current_level {
+                            tint
                         } else {
                             egui::Color32::DARK_GRAY
                         };
 
                         painter.circle_filled(center, circle_radius, fill_color);
-                        painter.circle_stroke(center, circle_radius, (1.0, egui::Color32::WHITE));
+                        painter.circle_stroke(center, circle_radius, (1.0, tint.gamma_multiply(0.6)));
                     }
                 }
             }
@@ -1251,7 +1273,7 @@ impl SaveEditorApp {
                             let mut val = save.stats.tree_unlocks[node.id];
                             ui.horizontal(|ui| {
                                 ui.label("Unlock level:");
-                                if ui.add(egui::DragValue::new(&mut val).range(0..=node.max_unlock()).speed(1)).changed() {
+                                if ui.add(egui::DragValue::new(&mut val).range(0..=node.max_unlock()).speed(0.01)).changed() {
                                     save.stats.tree_unlocks[node.id] = val;
                                     SaveEditorApp::recalc_player_stats(save, catalog);
                                 }
