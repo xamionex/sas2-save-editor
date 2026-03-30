@@ -11,7 +11,6 @@ use sas2_save::skilltree::{SkillTreeCatalog, SKILL_IMG};
 use sas2_save::{loot_names, BestiaryBeast, Item, SaveData};
 use std::fs;
 use std::path::{Path, PathBuf};
-use image::ImageFormat;
 
 #[derive(Clone)]
 pub struct XnbNode {
@@ -239,7 +238,7 @@ impl SaveEditorApp {
             eprintln!("items.xnb not found at {:?}", items_xnb);
             return;
         }
-        match sas2_save::xnb_loader::load_texture_from_xnb(items_xnb.to_str().unwrap()) {
+        match sas2_save::xnb_loader::load_texture_from_path(items_xnb.to_str().unwrap()) {
             Ok(img) => {
                 let width = img.width();
                 let height = img.height();
@@ -1007,13 +1006,13 @@ impl SaveEditorApp {
     }
 
     pub fn start_export_job(&mut self, files: Vec<PathBuf>, overwrite: bool) {
-        let game_path = self.config.game_path.clone().unwrap();
-
+        use sas2_save::xnb_loader::{load_asset_from_xnb, export_asset_to_file, asset_extension};
         use std::sync::{
             atomic::{AtomicBool, AtomicUsize, Ordering},
             Arc,
         };
 
+        let game_path = self.config.game_path.clone().unwrap();
         let cancel_flag = Arc::new(AtomicBool::new(false));
         let progress = Arc::new(AtomicUsize::new(0));
         let total = Arc::new(AtomicUsize::new(files.len()));
@@ -1032,39 +1031,46 @@ impl SaveEditorApp {
             let export_root = PathBuf::from("exports");
             let _ = fs::create_dir_all(&export_root);
 
-            files.iter().for_each(|path| {
+            for path in files {
                 if cancel_flag.load(Ordering::Relaxed) {
-                    return;
+                    break;
                 }
 
-                let relative = path.strip_prefix(&game_path).unwrap_or(path);
-
+                // Compute relative path and output file
+                let relative = path.strip_prefix(&game_path).unwrap_or(&path);
                 let mut out_path = export_root.join(relative);
-                out_path.set_extension("png");
+                //let original_ext = out_path.extension().unwrap_or_default().to_str().unwrap_or("xnb");
+                out_path.set_extension(""); // remove .xnb
 
-                // SKIP if already exported
-                if !overwrite_flag && out_path.exists() {
-                    progress.fetch_add(1, Ordering::Relaxed);
-                    return;
-                }
-
-                match sas2_save::xnb_loader::load_texture_from_xnb(path.to_str().unwrap()) {
-                    Ok(img) => {
-                        if let Some(parent) = out_path.parent() {
-                            let _ = fs::create_dir_all(parent);
-                        }
-
-                        if let Err(e) = img.save_with_format(&out_path, ImageFormat::Png) {
-                            eprintln!("Failed to save {:?}: {}", out_path, e);
-                        }
-                    }
+                // Load the asset and determine its type
+                let asset = match load_asset_from_xnb(path.to_str().unwrap()) {
+                    Ok(a) => a,
                     Err(e) => {
                         eprintln!("Failed to load {:?}: {}", path, e);
+                        progress.fetch_add(1, Ordering::Relaxed);
+                        continue;
                     }
+                };
+
+                // Determine final extension based on asset type
+                let ext = asset_extension(&asset);
+                out_path.set_extension(ext);
+
+                if !overwrite_flag && out_path.exists() {
+                    progress.fetch_add(1, Ordering::Relaxed);
+                    continue;
+                }
+
+                if let Some(parent) = out_path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+
+                if let Err(e) = export_asset_to_file(asset, &out_path) {
+                    eprintln!("Failed to export {:?}: {}", out_path, e);
                 }
 
                 progress.fetch_add(1, Ordering::Relaxed);
-            });
+            }
 
             done.store(true, Ordering::Relaxed);
         });
@@ -1112,7 +1118,7 @@ impl SaveEditorApp {
         }
     }
 
-    pub fn export_textures(&mut self) {
+    pub fn export_assets(&mut self) {
         let game_path = match &self.config.game_path {
             Some(p) => p.clone(),
             None => {
@@ -1509,8 +1515,8 @@ impl eframe::App for SaveEditorApp {
                         self.choose_game_folder();
                         ui.close();
                     }
-                    if ui.button("Export Textures (interface)").clicked() {
-                        self.export_textures();
+                    if ui.button("Export XNB Files").clicked() {
+                        self.export_assets();
                         ui.close();
                     }
                 });
@@ -1579,7 +1585,7 @@ impl eframe::App for SaveEditorApp {
                 let mut should_cancel = false;
                 let mut should_close = false;
 
-                egui::Window::new("Exporting XNB Textures")
+                egui::Window::new("Exporting XNB Files")
                     .collapsible(false)
                     .resizable(false)
                     .show(ui.ctx(), |ui| {

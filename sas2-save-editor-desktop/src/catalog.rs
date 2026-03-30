@@ -34,7 +34,7 @@ pub fn load_skilltree_texture(game_path: &Path, ctx: &egui::Context) -> Result<e
     // Skill icons are on the main UI atlas
     let interface_xnb = game_path.join("Content").join("gfx").join("interface.xnb");
     if interface_xnb.exists() {
-        let img = sas2_save::xnb_loader::load_texture_from_xnb(interface_xnb.to_str().unwrap())?;
+        let img = sas2_save::xnb_loader::load_texture_from_path(interface_xnb.to_str().unwrap())?;
         let width = img.width();
         let height = img.height();
         let pixels = img.into_vec();

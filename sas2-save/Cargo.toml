@@ -8,4 +8,6 @@ byteorder = "1.5"
 thiserror = "2.0.18"
 md5 = "0.8.0"
 image = "0.25.10"
-xnb = { git = "https://github.com/jdm/xnb-rs.git" }
+xnb = { git = "https://github.com/xamionex/xnb-rs.git" }
+serde_json = "1.0.149"
+serde = { version = "1.0.228", features = ["derive"] }
