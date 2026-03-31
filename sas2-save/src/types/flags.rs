@@ -2,6 +2,7 @@ use crate::utils::{read_string, write_string, SaveError};
 use crate::types::serializable::BinarySerializable;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{Read, Write};
+use crate::types::ng_level;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerFlags {
@@ -28,18 +29,16 @@ impl BinarySerializable for PlayerFlags {
         let bounty_seed = reader.read_i32::<LittleEndian>()?;
         let bounties_complete = reader.read_i32::<LittleEndian>()?;
 
-        let ng_level = flags
-            .iter()
-            .filter_map(|f| f.strip_prefix("$&ng_").and_then(|s| s.parse::<i32>().ok()))
-            .max()
-            .unwrap_or(0);
-
-        Ok(PlayerFlags {
+        let mut result = PlayerFlags {
             flags,
             bounty_seed,
             bounties_complete,
-            ng_level,
-        })
+            ng_level: 0,
+        };
+
+        ng_level::update_ng_level(&mut result);
+
+        Ok(result)
     }
 
     fn write<W: Write>(&self, writer: &mut W, _version: i32) -> Result<(), SaveError> {

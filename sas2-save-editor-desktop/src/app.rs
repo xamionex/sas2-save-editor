@@ -12,6 +12,7 @@ use sas2_save::{loot_names, BestiaryBeast, Item, SaveData};
 use std::fs;
 use std::path::{Path, PathBuf};
 use sas2_save::types::faction::PlayerFaction;
+use sas2_save::types::ng_level;
 
 #[derive(Clone)]
 pub struct XnbNode {
@@ -347,6 +348,10 @@ impl SaveEditorApp {
             ui.label("Hazeburnt:");
             ui.checkbox(&mut save.stats.hazeburnt, "");
         });
+
+        ui.separator();
+        ui.heading("New Game+ Level");
+        Self::add_ng_level_label(ui, save);
 
         ui.separator();
         ui.heading("Attributes (from skill tree)");
@@ -860,6 +865,17 @@ impl SaveEditorApp {
         });
     }
 
+    pub fn add_ng_level_label(ui: &mut egui::Ui, save: &mut SaveData) {
+        ui.horizontal(|ui| {
+            ui.label("NG Level:");
+            let mut ng = save.flags.ng_level;
+            if ui.add(egui::DragValue::new(&mut ng).speed(0.025).range(0..=1000)).changed() {
+                ng_level::set_ng_level(&mut save.flags, ng);
+            }
+            ui.label("(This adds/removes the $&ng_X flag)");
+        });
+    }
+
     pub fn show_flags_ui(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
         ui.heading("Player Flags");
         ui.separator();
@@ -880,6 +896,7 @@ impl SaveEditorApp {
                 }
                 if let Some(i) = to_remove {
                     save.flags.flags.remove(i);
+                    ng_level::update_ng_level(&mut save.flags);
                 }
             });
 
@@ -902,15 +919,9 @@ impl SaveEditorApp {
             ui.add(egui::DragValue::new(&mut save.flags.bounties_complete).speed(0.025).range(0..=999999));
         });
 
-        // Recalculate NG level from flags after any edit
-        save.flags.ng_level = save.flags.flags.iter()
-            .filter_map(|f| f.strip_prefix("$&ng_").and_then(|s| s.parse::<i32>().ok()))
-            .max()
-            .unwrap_or(0);
-
-        ui.label(format!("NG Level: {}", save.flags.ng_level));
-        ui.label("Note: NG level is derived from flags. To change NG level, add or edit a flag starting with $&ng_. For example level 3 is $&ng_3");
-        ui.label("Flags preserved across NG cycles: v$t_AREA_NOWHERE, dawnlight_saved, shroud_saved, blueheart_saved, oath_saved, sheriff_saved, chaos_saved. The flag \"$1ntr0\" is automatically added if missing.");
+        Self::add_ng_level_label(ui, save);
+        ui.label("Note: NG level is derived from flags.");
+        ui.label("Flags that preserve across NG cycles: v$t_AREA_NOWHERE, dawnlight_saved, shroud_saved, blueheart_saved, oath_saved, sheriff_saved, chaos_saved. The flag \"$1ntr0\" is automatically added if missing.");
     }
 
     pub fn add_bestiary_details(ui: &mut egui::Ui, beast: &mut BestiaryBeast) {
@@ -1526,10 +1537,7 @@ impl SaveEditorApp {
             // Update flags
             selected.apply_to_flags(&mut save.flags.flags);
             // Recompute ng_level after flag changes (just in case)
-            save.flags.ng_level = save.flags.flags.iter()
-                .filter_map(|f| f.strip_prefix("$&ng_").and_then(|s| s.parse::<i32>().ok()))
-                .max()
-                .unwrap_or(0);
+            ng_level::update_ng_level(&mut save.flags);
         }
 
         ui.separator();
