@@ -11,6 +11,7 @@ use sas2_save::skilltree::{SkillTreeCatalog, SKILL_IMG};
 use sas2_save::{loot_names, BestiaryBeast, Item, SaveData};
 use std::fs;
 use std::path::{Path, PathBuf};
+use sas2_save::types::faction::PlayerFaction;
 
 #[derive(Clone)]
 pub struct XnbNode {
@@ -36,6 +37,7 @@ pub enum Tab {
     Bestiary,
     Cosmetics,
     SkillTree,
+    Faction,
 }
 
 #[derive(PartialEq)]
@@ -738,6 +740,9 @@ impl SaveEditorApp {
                                     count: add_item_count_local,
                                     upgrade: add_item_upgrade_local,
                                     stock_piled: false,
+                                    artifact_seed: -1,
+                                    item_version: 0,
+                                    rarity: 1,
                                 };
 
                                 Self::draw_item_details(ui, def, &mut dummy_item);
@@ -752,6 +757,9 @@ impl SaveEditorApp {
                                             count: add_item_count_local,
                                             upgrade: add_item_upgrade_local,
                                             stock_piled: false,
+                                            artifact_seed: -1,
+                                            item_version: 0,
+                                            rarity: 1,
                                         });
                                     }
 
@@ -761,6 +769,9 @@ impl SaveEditorApp {
                                             count: add_item_count_local,
                                             upgrade: add_item_upgrade_local,
                                             stock_piled: true,
+                                            artifact_seed: -1,
+                                            item_version: 0,
+                                            rarity: 1,
                                         });
                                     }
                                 });
@@ -1493,6 +1504,44 @@ impl SaveEditorApp {
             );
         });
     }
+
+    pub fn show_faction_ui(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
+        ui.heading("Player Faction");
+        ui.separator();
+
+        // Determine current faction from flags
+        let current_faction = PlayerFaction::from_flags(&save.flags.flags);
+        let mut selected = current_faction;
+
+        ui.label("Faction:");
+        egui::ComboBox::from_label("")
+            .selected_text(current_faction.name())
+            .show_ui(ui, |ui| {
+                for faction in PlayerFaction::get_all() {
+                    ui.selectable_value(&mut selected, *faction, faction.name());
+                }
+            });
+
+        if selected != current_faction {
+            // Update flags
+            selected.apply_to_flags(&mut save.flags.flags);
+            // Recompute ng_level after flag changes (just in case)
+            save.flags.ng_level = save.flags.flags.iter()
+                .filter_map(|f| f.strip_prefix("$&ng_").and_then(|s| s.parse::<i32>().ok()))
+                .max()
+                .unwrap_or(0);
+        }
+
+        ui.separator();
+        ui.label("Faction is determined by the presence of certain flags:");
+        ui.label("dawnlight_saved -> Dawnlight Order");
+        ui.label("shroud_saved -> Shrouded Alliance");
+        ui.label("blueheart_saved -> Blueheart Runners");
+        ui.label("sheriff_saved -> Sheriff Inquisitors");
+        ui.label("oath_saved -> Oathbound Watchers");
+        ui.label("chaos_saved -> Chaos Eaters");
+        ui.label("(No flag means No Faction)");
+    }
 }
 
 impl eframe::App for SaveEditorApp {
@@ -1553,6 +1602,7 @@ impl eframe::App for SaveEditorApp {
                         ui.selectable_value(&mut self.active_tab, Tab::Cosmetics, "Cosmetics");
                         ui.selectable_value(&mut self.active_tab, Tab::Flags, "Flags");
                         ui.selectable_value(&mut self.active_tab, Tab::Bestiary, "Bestiary");
+                        ui.selectable_value(&mut self.active_tab, Tab::Faction, "Faction");
                     });
                 });
 
@@ -1564,6 +1614,7 @@ impl eframe::App for SaveEditorApp {
                     Tab::Cosmetics => self.show_cosmetics_ui(ui, save),
                     Tab::Flags => self.show_flags_ui(ui, save),
                     Tab::Bestiary => self.show_bestiary_ui(ui, save),
+                    Tab::Faction => self.show_faction_ui(ui, save),
                 }
             } else {
                 ui.label("No save file loaded. Click File -> Open to load a save.");
