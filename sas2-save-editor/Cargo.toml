@@ -1,5 +1,5 @@
 [package]
-name = "sas2-save-editor-desktop"
+name = "sas2-save-editor"
 version = "1.0.0"
 edition = "2024"
 

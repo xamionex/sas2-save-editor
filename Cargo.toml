@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "sas2-save",
-    "sas2-save-editor-desktop",
+    "sas2-save-editor",
 ]
 resolver = "2"
 
