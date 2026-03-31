@@ -330,7 +330,7 @@ impl SaveEditorApp {
         });
         ui.horizontal(|ui| {
             ui.label("Level:");
-            ui.add(egui::DragValue::new(&mut save.stats.level).speed(0.025).range(1..=100));
+            ui.add(egui::DragValue::new(&mut save.stats.level).speed(0.025).range(1..=999999));
         });
         ui.horizontal(|ui| {
             ui.label("XP:");
@@ -869,7 +869,7 @@ impl SaveEditorApp {
         ui.horizontal(|ui| {
             ui.label("NG Level:");
             let mut ng = save.flags.ng_level;
-            if ui.add(egui::DragValue::new(&mut ng).speed(0.025).range(0..=1000)).changed() {
+            if ui.add(egui::DragValue::new(&mut ng).speed(0.025).range(0..=999999)).changed() {
                 ng_level::set_ng_level(&mut save.flags, ng);
             }
             ui.label("(This adds/removes the $&ng_X flag)");
