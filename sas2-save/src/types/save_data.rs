@@ -115,7 +115,8 @@ impl SaveData {
         } else {
             (raw_version, if raw_version == 18 || raw_version == 19 { raw_version } else { 0 })
         };
-        let is_mod = raw_version > 100;
+        
+        //let is_mod = raw_version > 100;
 
         let mut data_part = Vec::new();
 
