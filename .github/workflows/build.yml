@@ -8,9 +8,6 @@ on:
   pull_request:
     branches: [ "main" ]
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build:
     strategy:
@@ -39,7 +36,7 @@ jobs:
         run: |
           Compress-Archive -Path target/release/${{ github.event.repository.name }}.exe -DestinationPath out/${{ github.event.repository.name }}-windows.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.os }}
           path: out/
