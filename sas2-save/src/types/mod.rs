@@ -1,13 +1,14 @@
 //! Types for working with Salt and Sacrifice save data.
 
-mod serializable;
-mod stats;
-mod item;
-mod equipment;
-mod flags;
-mod bestiary;
-mod save_data;
+pub mod serializable;
+pub mod stats;
+pub mod item;
+pub mod equipment;
+pub mod flags;
+pub mod bestiary;
+pub mod save_data;
 pub mod faction;
+pub mod ng_level;
 
 pub use serializable::BinarySerializable;
 pub use stats::Stats;
