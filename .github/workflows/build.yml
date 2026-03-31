@@ -26,17 +26,18 @@ jobs:
       - name: Build release
         run: cargo build --release
 
+      - name: Create output directory
+        run: mkdir out
+
       - name: Archive (Linux/macOS)
         if: matrix.os != 'windows-latest'
-        run: |
-          mkdir out
-          zip -j out/${{ github.event.repository.name }}-${{ matrix.os }}.zip target/release/${{ github.event.repository.name }}
+        run: zip -j out/${{ github.event.repository.name }}-${{ matrix.os }}.zip target/release/${{ github.event.repository.name }}
 
       - name: Archive (Windows)
         if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
-          mkdir out
-          zip -j out/${{ github.event.repository.name }}-windows.zip target/release/${{ github.event.repository.name }}.exe
+          Compress-Archive -Path target/release/${{ github.event.repository.name }}.exe -DestinationPath out/${{ github.event.repository.name }}-windows.zip
 
       - uses: actions/upload-artifact@v4
         with:
