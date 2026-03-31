@@ -1,0 +1,71 @@
+name: Build
+
+on:
+  push:
+    branches: [ "main" ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN_NAME: sas2-save-editor
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build
+      run: cargo build --release
+
+    - name: Package Artifacts
+      if: startsWith(github.ref, 'refs/tags/')
+      shell: bash
+      run: |
+        # Setup naming
+        ZIP_NAME="${{ github.event.repository.name }}-${{ matrix.os }}.zip"
+        
+        if [ "${{ matrix.os }}" == "windows-latest" ]; then
+          BIN_PATH="target/release/${{ env.BIN_NAME }}.exe"
+          # Use PowerShell's Compress-Archive instead of 7z
+          powershell -Command "Compress-Archive -Path '$BIN_PATH' -DestinationPath '$ZIP_NAME'"
+        else
+          BIN_PATH="target/release/${{ env.BIN_NAME }}"
+          zip -j "$ZIP_NAME" "$BIN_PATH"
+        fi
+        
+        echo "ASSET_PATH=$ZIP_NAME" >> $GITHUB_ENV
+
+    - name: Package Artifacts
+      id: package
+      if: startsWith(github.ref, 'refs/tags/')
+      shell: bash
+      run: |
+        ZIP_NAME="${{ github.event.repository.name }}-${{ matrix.os }}.zip"
+        
+        if [ "${{ matrix.os }}" == "windows-latest" ]; then
+          BIN_PATH="target/release/${{ env.BIN_NAME }}.exe"
+          powershell -Command "Compress-Archive -Path '$BIN_PATH' -DestinationPath '$ZIP_NAME' -Force"
+        else
+          BIN_PATH="target/release/${{ env.BIN_NAME }}"
+          zip -j "$ZIP_NAME" "$BIN_PATH"
+        fi
+        
+        # Set the output for the next step
+        echo "zip_name=$ZIP_NAME" >> $GITHUB_OUTPUT
+
+    - name: Upload Release Assets
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: ${{ steps.package.outputs.zip_name }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
