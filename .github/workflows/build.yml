@@ -51,8 +51,7 @@ jobs:
       - name: Archive (Linux/macOS)
         if: matrix.platform != 'windows'
         run: |
-          cp target/${{ matrix.target }}/release/${{ github.event.repository.name }} out/ || cp target/release/${{ github.event.repository.name }} out/
-          cd out && zip -j -9 ${{ github.event.repository.name }}-${{ matrix.platform }}.zip *
+          find target -maxdepth 3 -name "${{ github.event.repository.name }}" -type f -not -path "*/deps/*" -exec cp {} out/ \; && cd out && zip -j -9 ${{ github.event.repository.name }}-${{ matrix.platform }}.zip ${{ github.event.repository.name }}
 
       - name: Archive (Windows)
         if: matrix.platform == 'windows'
