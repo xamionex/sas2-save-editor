@@ -28,15 +28,36 @@ jobs:
 
       - name: Archive (Linux/macOS)
         if: matrix.os != 'windows-latest'
-        run: zip -j out/${{ github.event.repository.name }}-${{ matrix.os }}.zip target/release/${{ github.event.repository.name }}
+        run: zip -j -9 out/${{ github.event.repository.name }}-${{ matrix.os }}.zip target/release/${{ github.event.repository.name }}
 
       - name: Archive (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          Compress-Archive -Path target/release/${{ github.event.repository.name }}.exe -DestinationPath out/${{ github.event.repository.name }}-windows.zip
+          Compress-Archive -CompressionLevel Optimal -Path target/release/${{ github.event.repository.name }}.exe -DestinationPath out/${{ github.event.repository.name }}-windows.zip
 
       - uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.os }}
           path: out/
+
+      - name: Publish Prerelease
+        if: startsWith(github.ref, 'refs/tags/') == false
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.sha }}
+          name: "Build: ${{ github.sha }}"
+          body: "Release for commit ${{ github.sha }}"
+          files: out/*.zip
+          prerelease: true
+          target_commitish: ${{ github.sha }}
+
+      - name: Publish Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Build: ${{ github.ref_name }}"
+          body: "Release for tag ${{ github.ref_name }}"
+          files: out/*.zip
+          prerelease: false
