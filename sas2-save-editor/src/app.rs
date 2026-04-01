@@ -1241,7 +1241,7 @@ impl SaveEditorApp {
         // Zoom controls
         ui.horizontal(|ui| {
             ui.label("Zoom:");
-            ui.add(egui::Slider::new(&mut self.skilltree_zoom, 0.2..=2.0).logarithmic(true));
+            ui.add(egui::Slider::new(&mut self.skilltree_zoom, 0.05..=4.0).logarithmic(true));
             if ui.button("Reset View").clicked() {
                 self.skilltree_zoom = 0.5;
                 self.skilltree_centered = false; // Force re-center on next frame
@@ -1291,7 +1291,7 @@ impl SaveEditorApp {
                 let scroll = ui.input(|i| i.smooth_scroll_delta.y);
                 if scroll != 0.0 {
                     let old_zoom = self.skilltree_zoom;
-                    self.skilltree_zoom = (self.skilltree_zoom * (1.0 + scroll * 0.001)).clamp(0.2, 1.5);
+                    self.skilltree_zoom = (self.skilltree_zoom * (1.0 + scroll * 0.001)).clamp(0.05, 4.0);
                     let mouse = response.hover_pos().unwrap_or(canvas_rect.center());
                     let world_before = (mouse - canvas_rect.min) / old_zoom + self.skilltree_scroll;
                     let world_after = (mouse - canvas_rect.min) / self.skilltree_zoom + self.skilltree_scroll;
