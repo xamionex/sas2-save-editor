@@ -12,52 +12,67 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu.2.28
+            platform: linux
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            platform: macos
+
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu, x86_64-pc-windows-msvc, x86_64-apple-darwin
+
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild
 
       - name: Build release
-        run: cargo build --release
+        # We use zigbuild specifically for the Linux target to hit glibc 2.28
+        # For Windows/macOS, zigbuild still works as a wrapper
+        run: cargo zigbuild --release --target ${{ matrix.target }}
 
       - name: Create output directory
         run: mkdir out
 
       - name: Archive (Linux/macOS)
-        if: matrix.os != 'windows-latest'
-        run: zip -j -9 out/${{ github.event.repository.name }}-${{ matrix.os }}.zip target/release/${{ github.event.repository.name }}
+        if: matrix.platform != 'windows'
+        run: |
+          cp target/${{ matrix.target }}/release/${{ github.event.repository.name }} out/ || cp target/release/${{ github.event.repository.name }} out/
+          cd out && zip -j -9 ${{ github.event.repository.name }}-${{ matrix.platform }}.zip *
 
       - name: Archive (Windows)
-        if: matrix.os == 'windows-latest'
+        if: matrix.platform == 'windows'
         shell: pwsh
         run: |
-          Compress-Archive -CompressionLevel Optimal -Path target/release/${{ github.event.repository.name }}.exe -DestinationPath out/${{ github.event.repository.name }}-windows.zip
+          $binPath = "target/${{ matrix.target }}/release/${{ github.event.repository.name }}.exe"
+          Compress-Archive -CompressionLevel Optimal -Path $binPath -DestinationPath out/${{ github.event.repository.name }}-windows.zip
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}
-          path: out/
-
-      - name: Publish Prerelease
-        if: startsWith(github.ref, 'refs/tags/') == false
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.sha }}
-          name: "Build: ${{ github.sha }}"
-          body: "Release for commit ${{ github.sha }}"
-          files: out/*.zip
-          prerelease: true
-          target_commitish: ${{ github.sha }}
+          name: ${{ matrix.platform }}-artifact
+          path: out/*.zip
 
       - name: Publish Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
         with:
-          tag_name: ${{ github.ref_name }}
-          name: "Build: ${{ github.ref_name }}"
-          body: "Release for tag ${{ github.ref_name }}"
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('build-{0}', github.sha) }}
+          name: "Build: ${{ github.ref_name || github.sha }}"
+          body: "Automated build for ${{ matrix.platform }}"
           files: out/*.zip
-          prerelease: false
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          generate_release_notes: true
