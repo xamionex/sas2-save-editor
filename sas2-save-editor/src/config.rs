@@ -3,9 +3,29 @@ use std::fs;
 use std::path::PathBuf;
 use directories::ProjectDirs;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub game_path: Option<PathBuf>,
+    pub item_icon_size: f32,
+    pub item_font_size: f32,
+    pub drag_value_sensitivity: f32,
+    pub dummy_drag_value: f32,
+}
+
+pub fn default_item_icon_size() -> f32 { 52.0 }
+pub fn default_item_font_size() -> f32 { 12.0 }
+pub fn default_drag_sensitivity() -> f32 { 0.025 }
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            game_path: None,
+            item_icon_size: default_item_icon_size(),
+            item_font_size: default_item_font_size(),
+            drag_value_sensitivity: default_drag_sensitivity(),
+            dummy_drag_value: 0.0,
+        }
+    }
 }
 
 impl AppConfig {

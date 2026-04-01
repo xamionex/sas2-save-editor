@@ -1,8 +1,8 @@
 use crate::catalog::{load_loot_catalog, load_monster_catalog, load_skilltree_catalog, load_skilltree_texture};
-use crate::config::AppConfig;
+use crate::config::{default_drag_sensitivity, default_item_font_size, default_item_icon_size, AppConfig};
 use eframe::egui::{Grid, ScrollArea, TextureHandle};
 use eframe::{egui, Frame};
-use egui::{pos2, Rect, Response, Stroke};
+use egui::{pos2, Rect, Response, Stroke, Ui};
 use rfd::FileDialog;
 use sas2_save::cosmetics::{AncestryCatalog, BeardCatalog, ClassCatalog, ColorCatalog, CrimeCatalog, EyeCatalog, HairCatalog, SexCatalog};
 use sas2_save::loot_catalog::{LootCatalog, LootDef};
@@ -49,6 +49,7 @@ pub enum EquipmentSubTab {
 }
 
 pub struct SaveEditorApp {
+    pub load_requested: bool,
     pub save_data: Option<SaveData>,
     pub file_path: Option<PathBuf>,
     pub error_message: Option<String>,
@@ -85,11 +86,13 @@ pub struct SaveEditorApp {
     pub export_picker_open: bool,
     pub export_state: Option<ExportState>,
     pub export_overwrite: bool,
+    pub settings_open: bool,
 }
 
 impl Default for SaveEditorApp {
     fn default() -> Self {
         let mut app = Self {
+            load_requested: false,
             save_data: None,
             file_path: None,
             error_message: None,
@@ -121,6 +124,7 @@ impl Default for SaveEditorApp {
             export_picker: None,
             export_picker_open: false,
             export_overwrite: false,
+            settings_open: false,
         };
 
         if let Some(game_path) = &app.config.game_path {
@@ -314,7 +318,7 @@ impl SaveEditorApp {
         }
     }
 
-    pub fn show_stats_ui(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
+    pub fn show_stats_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
         if self.stats_dirty {
             if let Some(catalog) = &self.skilltree_catalog {
                 SaveEditorApp::recalc_player_stats(save, catalog);
@@ -330,7 +334,7 @@ impl SaveEditorApp {
         });
         ui.horizontal(|ui| {
             ui.label("Level:");
-            ui.add(egui::DragValue::new(&mut save.stats.level).speed(0.025).range(1..=999999));
+            ui.add(egui::DragValue::new(&mut save.stats.level).speed(self.config.drag_value_sensitivity).range(1..=999999));
         });
         ui.horizontal(|ui| {
             ui.label("XP:");
@@ -351,7 +355,7 @@ impl SaveEditorApp {
 
         ui.separator();
         ui.heading("New Game+ Level");
-        Self::add_ng_level_label(ui, save);
+        self.add_ng_level_label(ui, save);
 
         ui.separator();
         ui.heading("Attributes (from skill tree)");
@@ -387,7 +391,7 @@ impl SaveEditorApp {
         ui.separator();
     }
 
-    pub fn show_equipment_ui(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
+    pub fn show_equipment_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
         ui.heading("Equipment");
         ui.separator();
 
@@ -437,23 +441,34 @@ impl SaveEditorApp {
         icon_uv
     }
 
-    pub fn draw_image_button(ui: &mut egui::Ui, icon_uv: Option<Rect>, atlas: Option<&TextureHandle>) -> Response {
+    pub fn draw_image_button(&self, ui: &mut Ui, icon_uv: Option<Rect>, atlas: Option<&TextureHandle>) -> Response {
         let response = if let Some(uv) = icon_uv {
             ui.add(
                 egui::Button::image(
                     egui::Image::from_texture(atlas.unwrap())
-                        .fit_to_exact_size(egui::vec2(48.0, 48.0))
+                        .fit_to_exact_size(egui::vec2(self.config.item_icon_size, self.config.item_icon_size))
                         .uv(uv),
                 )
             )
         } else {
-            ui.add_space(48.0);
-            ui.allocate_response(egui::vec2(48.0, 48.0), egui::Sense::click())
+            ui.add_space(self.config.item_icon_size);
+            ui.allocate_response(egui::vec2(self.config.item_icon_size, self.config.item_icon_size), egui::Sense::click())
         };
         response
     }
 
-    fn show_inventory_or_stockpile(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
+    pub fn add_item_label(ui: &mut Ui, title: String, font_size: f32) {
+        for text in title.split_whitespace() {
+            ui.add(
+                egui::Label::new(egui::RichText::new(text).size(font_size))
+                    .wrap_mode(egui::TextWrapMode::Truncate)
+                    .halign(egui::Align::Center)
+                    .show_tooltip_when_elided(false),
+            );
+        }
+    }
+
+    fn show_inventory_or_stockpile(&mut self, ui: &mut Ui, save: &mut SaveData) {
         let stockpile_mode = self.equipment_subtab == EquipmentSubTab::Stockpile;
         let items = &mut save.equipment.inventory_items;
 
@@ -523,8 +538,8 @@ impl SaveEditorApp {
                             for cat in categories {
                                 let orig_indices = grouped.get(&cat).unwrap();
 
+                                ui.style_mut().interaction.selectable_labels = false;
                                 ui.label(egui::RichText::new(&cat).strong());
-                                ui.add_space(4.0);
 
                                 Grid::new(&cat)
                                     .spacing([8.0, 8.0])
@@ -549,21 +564,17 @@ impl SaveEditorApp {
                                             };
 
                                             ui.vertical(|ui| {
-                                                let response = Self::draw_image_button(ui, icon_uv, atlas);
+                                                let response = self.draw_image_button(ui, icon_uv, atlas);
+                                                let button_width = response.rect.width();
 
                                                 if response.clicked() {
                                                     clicked_item = Some(orig_idx);
                                                 }
 
-                                                // Name under the button (non-clickable)
-                                                ui.scope(|ui| {
-                                                    ui.style_mut().interaction.selectable_labels = false;
+                                                ui.set_max_width(button_width);
 
-                                                    ui.add(
-                                                        egui::Label::new(&item_name)
-                                                            .sense(egui::Sense::empty())
-                                                    );
-                                                });
+                                                // Name under the button
+                                                Self::add_item_label(ui, item_name, self.config.item_font_size);
 
                                                 //ui.add(
                                                 //    egui::DragValue::new(&mut item.count)
@@ -615,7 +626,7 @@ impl SaveEditorApp {
                                 if let Some(def) =
                                     catalog.loot_defs.get(item.loot_idx as usize)
                                 {
-                                    Self::draw_item_details(ui, def, item);
+                                    self.draw_item_details(ui, def, item);
 
                                     if ui.button("Remove Item").clicked() {
                                         items.remove(orig_idx);
@@ -638,7 +649,7 @@ impl SaveEditorApp {
         self.selected_equipment_item = selected_equipment_item_local;
     }
 
-    fn show_add_items_tab(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
+    fn show_add_items_tab(&mut self, ui: &mut Ui, save: &mut SaveData) {
         let catalog = self.catalog.as_ref();
         let atlas = self.item_atlas.as_ref();
         let atlas_width = self.atlas_width;
@@ -697,6 +708,7 @@ impl SaveEditorApp {
                             for cat in categories {
                                 let items = grouped.get(&cat).unwrap();
 
+                                ui.style_mut().interaction.selectable_labels = false;
                                 ui.label(egui::RichText::new(&cat).strong());
 
                                 Grid::new(&cat)
@@ -706,21 +718,16 @@ impl SaveEditorApp {
                                             let icon_uv = self.get_icon_uv(def, atlas, atlas_width as f32, atlas_height as f32);
 
                                             ui.vertical(|ui| {
-                                                let response = Self::draw_image_button(ui, icon_uv, atlas);
+                                                let response = self.draw_image_button(ui, icon_uv, atlas);
+                                                let button_width = response.rect.width();
 
                                                 if response.clicked() {
                                                     clicked_item = Some(*idx);
                                                 }
 
-                                                // Name under the button
-                                                ui.scope(|ui| {
-                                                    ui.style_mut().interaction.selectable_labels = false;
+                                                ui.set_max_width(button_width);
 
-                                                    ui.add(
-                                                        egui::Label::new(&def.title[0])
-                                                            .sense(egui::Sense::empty())
-                                                    );
-                                                });
+                                                Self::add_item_label(ui, def.title[0].clone(), self.config.item_font_size);
                                             });
                                         }
                                     });
@@ -750,7 +757,7 @@ impl SaveEditorApp {
                                     rarity: 1,
                                 };
 
-                                Self::draw_item_details(ui, def, &mut dummy_item);
+                                self.draw_item_details(ui, def, &mut dummy_item);
 
                                 add_item_count_local = dummy_item.count;
                                 add_item_upgrade_local = dummy_item.upgrade;
@@ -797,10 +804,10 @@ impl SaveEditorApp {
     }
 
     /// Draw detailed information about an item (name, title, description, fields, etc.)
-    fn draw_item_details(
-        ui: &mut egui::Ui,
-        def: &LootDef,
-        item: &mut Item,
+    fn draw_item_details(&self,
+                         ui: &mut Ui,
+                         def: &LootDef,
+                         item: &mut Item,
     ) {
         ui.heading("Item Details");
         ui.separator();
@@ -828,10 +835,10 @@ impl SaveEditorApp {
 
         ui.horizontal(|ui| {
             ui.label("Count:");
-            ui.add(egui::DragValue::new(&mut item.count).speed(0.025).range(0..=999));
+            ui.add(egui::DragValue::new(&mut item.count).speed(self.config.drag_value_sensitivity).range(0..=999));
 
             ui.label("Upgrade:");
-            ui.add(egui::DragValue::new(&mut item.upgrade).speed(0.025).range(0..=10));
+            ui.add(egui::DragValue::new(&mut item.upgrade).speed(self.config.drag_value_sensitivity).range(0..=10));
         });
 
         ui.add_space(8.0);
@@ -865,18 +872,18 @@ impl SaveEditorApp {
         });
     }
 
-    pub fn add_ng_level_label(ui: &mut egui::Ui, save: &mut SaveData) {
+    pub fn add_ng_level_label(&self, ui: &mut Ui, save: &mut SaveData) {
         ui.horizontal(|ui| {
             ui.label("NG Level:");
             let mut ng = save.flags.ng_level;
-            if ui.add(egui::DragValue::new(&mut ng).speed(0.025).range(0..=999999)).changed() {
+            if ui.add(egui::DragValue::new(&mut ng).speed(self.config.drag_value_sensitivity).range(0..=999999)).changed() {
                 ng_level::set_ng_level(&mut save.flags, ng);
             }
             ui.label("(This adds/removes the $&ng_X flag)");
         });
     }
 
-    pub fn show_flags_ui(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
+    pub fn show_flags_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
         ui.heading("Player Flags");
         ui.separator();
 
@@ -912,26 +919,26 @@ impl SaveEditorApp {
         // Editable bounty data
         ui.horizontal(|ui| {
             ui.label("Bounty Seed:");
-            ui.add(egui::DragValue::new(&mut save.flags.bounty_seed).speed(0.025).range(0..=999999));
+            ui.add(egui::DragValue::new(&mut save.flags.bounty_seed).speed(self.config.drag_value_sensitivity).range(0..=999999));
         });
         ui.horizontal(|ui| {
             ui.label("Bounties Complete (bitmask):");
-            ui.add(egui::DragValue::new(&mut save.flags.bounties_complete).speed(0.025).range(0..=999999));
+            ui.add(egui::DragValue::new(&mut save.flags.bounties_complete).speed(self.config.drag_value_sensitivity).range(0..=999999));
         });
 
-        Self::add_ng_level_label(ui, save);
+        self.add_ng_level_label(ui, save);
         ui.label("Note: NG level is derived from flags.");
         ui.label("Flags that preserve across NG cycles: v$t_AREA_NOWHERE, dawnlight_saved, shroud_saved, blueheart_saved, oath_saved, sheriff_saved, chaos_saved. The flag \"$1ntr0\" is automatically added if missing.");
     }
 
-    pub fn add_bestiary_details(ui: &mut egui::Ui, beast: &mut BestiaryBeast) {
+    pub fn add_bestiary_details(&self, ui: &mut Ui, beast: &mut BestiaryBeast) {
         ui.horizontal(|ui| {
             ui.label("Kills:");
-            ui.add(egui::DragValue::new(&mut beast.kills).speed(0.025).range(0..=9999));
+            ui.add(egui::DragValue::new(&mut beast.kills).speed(self.config.drag_value_sensitivity).range(0..=9999));
         });
         ui.horizontal(|ui| {
             ui.label("Deaths:");
-            ui.add(egui::DragValue::new(&mut beast.deaths).speed(0.025).range(0..=9999));
+            ui.add(egui::DragValue::new(&mut beast.deaths).speed(self.config.drag_value_sensitivity).range(0..=9999));
         });
         ui.label("Drops:");
         for (drop_idx, drop) in beast.drops.iter_mut().enumerate() {
@@ -939,7 +946,7 @@ impl SaveEditorApp {
         }
     }
 
-    pub fn show_bestiary_ui(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
+    pub fn show_bestiary_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
         ui.heading("Bestiary");
         ui.separator();
 
@@ -954,11 +961,11 @@ impl SaveEditorApp {
                             .get(idx)
                             .map(|m| m.name.clone())
                             .unwrap_or_else(|| format!("Beast {}", idx));
-                        ui.collapsing(format!("{} (ID: {})", name, idx), |ui| SaveEditorApp::add_bestiary_details(ui, beast));
+                        ui.collapsing(format!("{} (ID: {})", name, idx), |ui| self.add_bestiary_details(ui, beast));
                     }
                 } else {
                     for (idx, beast) in save.bestiary.beasts.iter_mut().enumerate() {
-                        ui.collapsing(format!("Beast {}", idx), |ui| SaveEditorApp::add_bestiary_details(ui, beast));
+                        ui.collapsing(format!("Beast {}", idx), |ui| self.add_bestiary_details(ui, beast));
                     }
                     if let Some(err) = &self.monster_catalog_error {
                         ui.colored_label(egui::Color32::RED, format!("Monster catalog error: {}", err));
@@ -967,7 +974,7 @@ impl SaveEditorApp {
             });
     }
 
-    pub fn show_cosmetics_ui(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
+    pub fn show_cosmetics_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
         ui.heading("Cosmetics");
         ui.separator();
 
@@ -1021,7 +1028,7 @@ impl SaveEditorApp {
                     ui.colored_label(egui::Color32::GRAY, format!("{}", *value));
                 } else {
                     // Fallback for unused slot
-                    ui.add(egui::DragValue::new(value).speed(0.025).range(0..=999));
+                    ui.add(egui::DragValue::new(value).speed(self.config.drag_value_sensitivity).range(0..=999));
                 }
             });
         }
@@ -1110,7 +1117,7 @@ impl SaveEditorApp {
         }
     }
 
-    fn draw_xnb_tree(ui: &mut egui::Ui, node: &mut XnbNode) {
+    fn draw_xnb_tree(ui: &mut Ui, node: &mut XnbNode) {
         if node.is_dir {
             // Create a unique ID for this header's state
             let id = ui.make_persistent_id(&node.name);
@@ -1194,7 +1201,7 @@ impl SaveEditorApp {
         self.export_picker_open = true;
     }
 
-    pub fn show_skilltree_ui(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
+    pub fn show_skilltree_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
         ui.heading("Skill Tree");
         ui.separator();
 
@@ -1516,7 +1523,7 @@ impl SaveEditorApp {
         });
     }
 
-    pub fn show_faction_ui(&mut self, ui: &mut egui::Ui, save: &mut SaveData) {
+    pub fn show_faction_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
         ui.heading("Player Faction");
         ui.separator();
 
@@ -1550,10 +1557,68 @@ impl SaveEditorApp {
         ui.label("chaos_saved -> Chaos Eaters");
         ui.label("(No flag means No Faction)");
     }
+
+    pub fn show_settings_window(&mut self, ctx: &egui::Context) {
+        if !self.settings_open {
+            return;
+        }
+
+        let mut is_open = self.settings_open;
+
+        let window = egui::Window::new("Configure UI")
+            .open(&mut is_open)
+            .resizable(false)
+            .collapsible(false);
+
+        window.show(ctx, |ui| {
+            ui.vertical(|ui| {
+                ui.heading("Item Display Settings");
+                ui.horizontal(|ui| {
+                    ui.label("Item Icon Size:");
+                    if ui.add(egui::DragValue::new(&mut self.config.item_icon_size).range(32.0..=128.0).speed(self.config.drag_value_sensitivity).suffix("px")).changed() {
+                        self.config.save();
+                    }
+                    if ui.button("Reset").clicked() {
+                        self.config.item_icon_size = default_item_icon_size();
+                        self.config.save();
+                    };
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Item Font Size:");
+                    if ui.add(egui::DragValue::new(&mut self.config.item_font_size).range(6.0..=24.0).speed(self.config.drag_value_sensitivity).suffix("pt")).changed() {
+                        self.config.save();
+                    }
+                    if ui.button("Reset").clicked() {
+                        self.config.item_font_size = default_item_font_size();
+                        self.config.save();
+                    };
+                });
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Drag Value Sensitivity:");
+                    if ui.add(egui::DragValue::new(&mut self.config.drag_value_sensitivity).range(0.005..=1.0).speed(0.025).suffix("x")).changed() {
+                        self.config.save();
+                    }
+                    if ui.button("Reset").clicked() {
+                        self.config.drag_value_sensitivity = default_drag_sensitivity();
+                        self.config.save();
+                    };
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Test Drag Value Sensitivity:");
+                    if ui.add(egui::DragValue::new(&mut self.config.dummy_drag_value).range(0.0..=1000.0).speed(self.config.drag_value_sensitivity).suffix("x")).changed() {
+                        self.config.save();
+                    }
+                });
+            })
+        });
+
+        self.settings_open = is_open;
+    }
 }
 
 impl eframe::App for SaveEditorApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut Frame) {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut Frame) {
         egui::CentralPanel::default().show_inside(ui, |ui| {
             // Menu bar
             egui::MenuBar::new().ui(ui, |ui| {
@@ -1576,8 +1641,14 @@ impl eframe::App for SaveEditorApp {
                         self.export_assets();
                         ui.close();
                     }
+                    if ui.button("Configure UI").clicked() {
+                        self.settings_open = true;
+                        ui.close();
+                    }
                 });
             });
+
+            self.show_settings_window(ui.ctx());
 
             // Show game folder status
             if let Some(game_path) = &self.config.game_path {
@@ -1602,7 +1673,7 @@ impl eframe::App for SaveEditorApp {
 
             if let Some(save) = &mut save_taken {
                 // Tab bar
-                egui::Panel::top("tabs").show_inside(ui, |ui| {
+                egui::Panel::top("tabs").show_separator_line(false).show_inside(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.selectable_value(&mut self.active_tab, Tab::Stats, "Stats");
                         ui.selectable_value(&mut self.active_tab, Tab::Equipment, "Equipment");
@@ -1613,6 +1684,8 @@ impl eframe::App for SaveEditorApp {
                         ui.selectable_value(&mut self.active_tab, Tab::Faction, "Faction");
                     });
                 });
+
+                ui.separator();
 
                 // Tab content
                 match self.active_tab {
@@ -1625,10 +1698,17 @@ impl eframe::App for SaveEditorApp {
                     Tab::Faction => self.show_faction_ui(ui, save),
                 }
             } else {
-                ui.label("No save file loaded. Click File -> Open to load a save.");
+                if ui.button("Open Save File").clicked() {
+                    self.load_requested = true;
+                }
             }
 
             self.save_data = save_taken;
+
+            if self.load_requested {
+                self.open_file();
+                self.load_requested = false;
+            }
 
             if let Some(err) = &self.error_message {
                 ui.colored_label(egui::Color32::RED, err);
