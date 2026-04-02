@@ -1803,7 +1803,7 @@ impl SaveEditorApp {
         ui.separator();
         ui.label("Warning: Mod only item data will be lost. (artifact seed, rarity, etc.)");
         ui.label("The resulting save should be compatible with the unmodded game.");
-        ui.label("This was only tested with Saltguard, backups will be created with the suffix .X.bak where X is a number.");
+        ui.label("This was only tested with Saltguard. Make backups.");
         ui.separator();
         if ui.button("Convert and Save As...").clicked() {
             self.convert_to_vanilla(save, self.conversion_target_version);
