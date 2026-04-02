@@ -91,6 +91,7 @@ pub struct SaveEditorApp {
 
     // conversion
     pub conversion_target_version: i32,
+    pub conversion_just_happened: bool,
 
     // hash
     pub hash_edit_string: String,
@@ -134,6 +135,7 @@ impl Default for SaveEditorApp {
             export_overwrite: false,
             settings_open: false,
             conversion_target_version: 19,
+            conversion_just_happened: false,
             hash_edit_string: String::new(),
             use_custom_hash: false,
         };
@@ -168,6 +170,7 @@ impl SaveEditorApp {
                         self.error_message = None;
                         self.hash_edit_string.clear();
                         self.use_custom_hash = false;
+                        self.conversion_just_happened = false;
                     }
                     Err(e) => self.error_message = Some(e.to_string()),
                 },
@@ -1775,6 +1778,7 @@ impl SaveEditorApp {
                                 self.file_path = Some(path);
                                 self.hash_edit_string.clear();
                                 self.active_tab = Tab::Stats; // switch to Stats tab
+                                self.conversion_just_happened = true;
                             }
                         }
                     }
@@ -1895,6 +1899,11 @@ impl eframe::App for SaveEditorApp {
                     Tab::Bestiary => self.show_bestiary_ui(ui, save),
                     Tab::Faction => self.show_faction_ui(ui, save),
                     Tab::ConvertSave => self.show_convert_save_ui(ui, save),
+                }
+                if self.conversion_just_happened {
+                    // Replace save_taken with the new save data
+                    save_taken = self.save_data.take();
+                    self.conversion_just_happened = false;
                 }
             } else {
                 if ui.button("Open Save File").clicked() {
