@@ -39,6 +39,7 @@ pub enum Tab {
     Cosmetics,
     SkillTree,
     Faction,
+    ConvertSave,
 }
 
 #[derive(PartialEq)]
@@ -87,6 +88,13 @@ pub struct SaveEditorApp {
     pub export_state: Option<ExportState>,
     pub export_overwrite: bool,
     pub settings_open: bool,
+
+    // conversion
+    pub conversion_target_version: i32,
+
+    // hash
+    pub hash_edit_string: String,
+    pub use_custom_hash: bool,
 }
 
 impl Default for SaveEditorApp {
@@ -125,6 +133,9 @@ impl Default for SaveEditorApp {
             export_picker_open: false,
             export_overwrite: false,
             settings_open: false,
+            conversion_target_version: 19,
+            hash_edit_string: String::new(),
+            use_custom_hash: false,
         };
 
         if let Some(game_path) = &app.config.game_path {
@@ -155,6 +166,8 @@ impl SaveEditorApp {
                         self.save_data = Some(save);
                         self.file_path = Some(path);
                         self.error_message = None;
+                        self.hash_edit_string.clear();
+                        self.use_custom_hash = false;
                     }
                     Err(e) => self.error_message = Some(e.to_string()),
                 },
@@ -163,8 +176,52 @@ impl SaveEditorApp {
         }
     }
 
+    fn create_backup(original_path: &Path) -> Option<PathBuf> {
+        if !original_path.exists() {
+            return None;
+        }
+
+        let file_stem = original_path.file_stem()?.to_string_lossy();
+        let parent = original_path.parent()?;
+
+        // Find the highest existing backup index
+        let pattern = format!("{}.", file_stem);
+        let mut max_idx = 0;
+        if let Ok(entries) = fs::read_dir(parent) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if name_str.starts_with(&pattern) && name_str.ends_with(".bak") {
+                    // Extract the number between the stem and ".bak"
+                    let middle = &name_str[pattern.len()..name_str.len() - 4];
+                    if let Ok(idx) = middle.parse::<u32>() {
+                        max_idx = max_idx.max(idx);
+                    }
+                }
+            }
+        }
+
+        let new_idx = max_idx + 1;
+        let backup_name = format!("{}.{}.bak", file_stem, new_idx);
+        let backup_path = parent.join(backup_name);
+
+        match fs::copy(original_path, &backup_path) {
+            Ok(_) => Some(backup_path),
+            Err(e) => {
+                eprintln!("Failed to create backup: {}", e);
+                None
+            }
+        }
+    }
+
     pub fn save_file(&mut self) {
-        if let (Some(save), Some(path)) = (self.save_data.as_ref(), &self.file_path) {
+        if let (Some(save), Some(path)) = (self.save_data.as_mut(), &self.file_path) {
+            SaveEditorApp::create_backup(path);
+            if self.use_custom_hash {
+                save.custom_hash_override = save.hash_data;
+            } else {
+                save.custom_hash_override = None;
+            }
             match save.to_bytes() {
                 Ok(data) => {
                     if let Err(e) = fs::write(path, data) {
@@ -336,6 +393,7 @@ impl SaveEditorApp {
             ui.label("Level:");
             ui.add(egui::DragValue::new(&mut save.stats.level).speed(self.config.drag_value_sensitivity).range(1..=999999));
         });
+        self.add_ng_level_label(ui, save);
         ui.horizontal(|ui| {
             ui.label("XP:");
             ui.add(egui::DragValue::new(&mut save.stats.xp).speed(100).range(0..=999999));
@@ -352,15 +410,42 @@ impl SaveEditorApp {
             ui.label("Hazeburnt:");
             ui.checkbox(&mut save.stats.hazeburnt, "");
         });
+        ui.checkbox(&mut self.use_custom_hash, "Use custom hash (disable auto-recalculation on save)");
+        if self.use_custom_hash {
+            ui.label("Warning: The game might reject the save if the custom hash doesn't match the actual data.");
+        }
+        if let Some(hash) = &mut save.hash_data {
+            // Initialize the edit string if it's empty (first time)
+            if self.hash_edit_string.is_empty() {
+                self.hash_edit_string = hash.iter().map(|b| format!("{:02x}", b)).collect();
+            }
 
-        ui.separator();
-        ui.heading("New Game+ Level");
-        self.add_ng_level_label(ui, save);
+            ui.horizontal(|ui| {
+                ui.label("Save Hash (MD5):");
+                let response = ui.text_edit_singleline(&mut self.hash_edit_string);
+
+                if response.changed() {
+                    // Validate the hex string
+                    if self.hash_edit_string.len() != 32 || !self.hash_edit_string.chars().all(|c| c.is_ascii_hexdigit()) {
+                        ui.colored_label(egui::Color32::RED, "Invalid hash (must be 32 hex characters)");
+                    } else {
+                        let mut new_hash = [0; 16];
+                        for i in 0..16 {
+                            let byte = u8::from_str_radix(&self.hash_edit_string[i*2..i*2+2], 16).unwrap();
+                            new_hash[i] = byte;
+                        }
+                        *hash = new_hash;
+                    }
+                }
+            });
+        } else {
+            // Reset the edit string when there is no hash
+            self.hash_edit_string.clear();
+        }
 
         ui.separator();
         ui.heading("Attributes (from skill tree)");
         ui.label("Visit skill tree tab to edit stats");
-        ui.separator();
 
         let stat_names = [
             "Strength",
@@ -387,8 +472,6 @@ impl SaveEditorApp {
                     ui.end_row();
                 }
             });
-
-        ui.separator();
     }
 
     pub fn show_equipment_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
@@ -1615,6 +1698,117 @@ impl SaveEditorApp {
 
         self.settings_open = is_open;
     }
+
+    /// Sanitizes a modded save for vanilla compatibility.
+    /// - Removes items with invalid loot_idx (outside vanilla catalog)
+    /// - Remaps equipped item indices accordingly
+    /// - Clamps upgrade values to 0-10
+    /// - Clamps item counts to 999
+    fn sanitize_for_vanilla(&self, save: &mut SaveData) {
+        let Some(catalog) = &self.catalog else {
+            eprintln!("Cannot sanitize: loot catalog not loaded");
+            return;
+        };
+        let max_valid_idx = catalog.loot_defs.len();
+
+        // Build a mapping from old index to new index for items that survive
+        let mut old_to_new = std::collections::HashMap::new();
+        let mut new_inventory = Vec::new();
+
+        for (old_idx, item) in save.equipment.inventory_items.iter().enumerate() {
+            // Keep only items whose loot_idx is within vanilla catalog
+            if (item.loot_idx as usize) < max_valid_idx {
+                // Clamp upgrade to vanilla max (10)
+                let mut sanitized = item.clone();
+                if sanitized.upgrade > 10 {
+                    sanitized.upgrade = 10;
+                }
+                // Clamp count to 999
+                if sanitized.count > 999 {
+                    sanitized.count = 999;
+                }
+                old_to_new.insert(old_idx, new_inventory.len());
+                new_inventory.push(sanitized);
+            }
+        }
+
+        save.equipment.inventory_items = new_inventory;
+
+        // Remap equipped items
+        for slot in &mut save.equipment.equipped_items {
+            if *slot >= 0 {
+                if let Some(&new_idx) = old_to_new.get(&(*slot as usize)) {
+                    *slot = new_idx as i32;
+                } else {
+                    *slot = -1; // item was removed
+                }
+            }
+        }
+    }
+
+    fn convert_to_vanilla(&mut self, save: &mut SaveData, target_version: i32) {
+        if save.version <= 100 {
+            self.error_message = Some("Save is already vanilla".to_string());
+            return;
+        }
+
+        let start_dir = self.file_path.as_ref().and_then(|p| p.parent()).map(|p| p.to_path_buf());
+        let mut dialog = FileDialog::new()
+            .add_filter("Salt and Sacrifice Save", &["slv"])
+            .set_file_name("converted.slv");
+        if let Some(dir) = start_dir {
+            dialog = dialog.set_directory(dir);
+        }
+
+        if let Some(path) = dialog.save_file() {
+            self.sanitize_for_vanilla(save);
+            match save.to_vanilla_bytes(target_version) {
+                Ok(data) => {
+                    if let Err(e) = fs::write(&path, data) {
+                        self.error_message = Some(format!("Failed to write file: {}", e));
+                    } else {
+                        self.error_message = None;
+                        // Reload the newly created vanilla save
+                        if let Ok(new_data) = fs::read(&path) {
+                            if let Ok(new_save) = SaveData::from_bytes(&new_data) {
+                                self.save_data = Some(new_save);
+                                self.file_path = Some(path);
+                                self.hash_edit_string.clear();
+                                self.active_tab = Tab::Stats; // switch to Stats tab
+                            }
+                        }
+                    }
+                }
+                Err(e) => self.error_message = Some(format!("Conversion failed: {}", e)),
+            }
+        } else {
+            self.error_message = Some("Save dialog cancelled".to_string());
+        }
+    }
+
+    pub fn show_convert_save_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
+        if save.version <= 100 {
+            ui.label("This save is already vanilla. No conversion needed.");
+            return;
+        }
+
+        ui.heading("Convert Modded Save to Vanilla");
+        ui.separator();
+        ui.label(format!("Current save version: {} (modded)", save.version));
+        ui.label("Select target vanilla version:");
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.conversion_target_version, 18, "Version 18");
+            ui.selectable_value(&mut self.conversion_target_version, 19, "Version 19");
+        });
+        ui.separator();
+        ui.label("Warning: Mod only item data will be lost. (artifact seed, rarity, etc.)");
+        ui.label("The resulting save should be compatible with the unmodded game.");
+        ui.label("This was only tested with Saltguard, backups will be created with the suffix .X.bak where X is a number.");
+        ui.separator();
+        if ui.button("Convert and Save As...").clicked() {
+            self.convert_to_vanilla(save, self.conversion_target_version);
+        }
+    }
 }
 
 impl eframe::App for SaveEditorApp {
@@ -1682,6 +1876,10 @@ impl eframe::App for SaveEditorApp {
                         ui.selectable_value(&mut self.active_tab, Tab::Flags, "Flags");
                         ui.selectable_value(&mut self.active_tab, Tab::Bestiary, "Bestiary");
                         ui.selectable_value(&mut self.active_tab, Tab::Faction, "Faction");
+                        // Only show ConvertSave tab if the save is modded
+                        if save.version > 100 {
+                            ui.selectable_value(&mut self.active_tab, Tab::ConvertSave, "Convert Save");
+                        }
                     });
                 });
 
@@ -1696,6 +1894,7 @@ impl eframe::App for SaveEditorApp {
                     Tab::Flags => self.show_flags_ui(ui, save),
                     Tab::Bestiary => self.show_bestiary_ui(ui, save),
                     Tab::Faction => self.show_faction_ui(ui, save),
+                    Tab::ConvertSave => self.show_convert_save_ui(ui, save),
                 }
             } else {
                 if ui.button("Open Save File").clicked() {

@@ -18,6 +18,7 @@ pub struct SaveData {
     pub bestiary: Bestiary,
     pub cosmetics: [i32; 11],
     pub hash_data: Option<[u8; 16]>,
+    pub custom_hash_override: Option<[u8; 16]>,
 }
 
 impl SaveData {
@@ -60,7 +61,9 @@ impl SaveData {
         let flags = PlayerFlags::read(&mut payload_reader, base_version)?;
 
         // For versions < 19 (vanilla only), skip 10 ints
+        let mut skipped_legacy_padding = false;
         if base_version < 19 && !is_mod {
+            skipped_legacy_padding = true;
             for _ in 0..10 {
                 payload_reader.read_i32::<LittleEndian>()?;
             }
@@ -79,6 +82,26 @@ impl SaveData {
                 "Read {} bytes, expected {}",
                 pos, payload_len
             )));
+        }
+
+        #[cfg(debug_assertions)]
+        {
+            println!("========================================");
+            println!("        SAVE FILE LOADED SUCCESS        ");
+            println!("========================================");
+            println!("Name:                 {}", name);
+            println!("Raw Version:          {}", raw_version);
+            println!("Base Version:         {}", base_version);
+            println!("Is Modded Format:     {}", is_mod);
+            println!("XOR Key Used:         {}", xor_key);
+            println!("Skipped V18 Padding:  {}", skipped_legacy_padding);
+            println!("----------------------------------------");
+            println!("Inventory Count:      {}", equipment.inventory_items.len());
+            println!("Active Flags Count:   {}", flags.flags.len());
+            println!("Bestiary Count:       {}", bestiary.beasts.len());
+            println!("Payload Size (bytes): {}", payload_len);
+            println!("Final Read Cursor:    {}", pos);
+            println!("========================================");
         }
 
         // Verify hash if present (base_version >= 18)
@@ -100,44 +123,55 @@ impl SaveData {
             bestiary,
             cosmetics,
             hash_data: if base_version >= 18 {
-                Some([0; 16]) // placeholder
+                let mut stored_hash = [0; 16];
+                stored_hash.copy_from_slice(hash_part);
+                Some(stored_hash)
             } else {
                 None
             },
+            custom_hash_override: None,
         })
     }
 
-    /// Write the save data to raw bytes.
-    pub fn to_bytes(&self) -> Result<Vec<u8>, SaveError> {
-        let raw_version = self.version;
+    /// Internal helper to write save data with an optional version override.
+    fn to_bytes_internal(&self, version_override: Option<i32>) -> Result<Vec<u8>, SaveError> {
+        let raw_version = version_override.unwrap_or(self.version);
+
         let (base_version, xor_key) = if raw_version > 100 {
             (raw_version - 100, 19)
         } else {
             (raw_version, if raw_version == 18 || raw_version == 19 { raw_version } else { 0 })
         };
-        
-        //let is_mod = raw_version > 100;
 
+        let is_mod = raw_version > 100;
         let mut data_part = Vec::new();
 
         write_string(&mut data_part, &self.name)?;
         self.stats.write(&mut data_part, base_version)?;
         self.equipment.write(&mut data_part, base_version)?;
         self.flags.write(&mut data_part, base_version)?;
+
+        // Padding for vanilla versions < 19 (40 bytes)
+        if base_version < 19 && !is_mod {
+            for _ in 0..10 {
+                data_part.write_i32::<LittleEndian>(0)?;
+            }
+        }
+
         self.bestiary.write(&mut data_part, base_version)?;
         for c in &self.cosmetics {
             data_part.write_i32::<LittleEndian>(*c)?;
         }
 
-        // Compute MD5 on plain data part
-        let hash = if base_version >= 18 {
-            md5::compute(&data_part)
+        // Compute hash on the unencrypted data_part
+        let hash_bytes = if let Some(custom) = self.custom_hash_override {
+            custom
+        } else if base_version >= 18 {
+            md5::compute(&data_part).0
         } else {
-            md5::compute(&[])
+            [0u8; 16]
         };
-        let hash_bytes = hash.0;
 
-        // XOR the data part
         if xor_key != 0 {
             xor_data(&mut data_part, xor_key);
         }
@@ -150,5 +184,20 @@ impl SaveData {
         }
 
         Ok(out)
+    }
+
+    /// Write the save data to raw bytes using the existing version.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, SaveError> {
+        self.to_bytes_internal(None)
+    }
+
+    /// Convert the save to a vanilla format with the given target version (≤100).
+    pub fn to_vanilla_bytes(&self, target_version: i32) -> Result<Vec<u8>, SaveError> {
+        if target_version > 100 {
+            return Err(SaveError::InvalidData(
+                "Vanilla version must be ≤ 100".to_string(),
+            ));
+        }
+        self.to_bytes_internal(Some(target_version))
     }
 }
