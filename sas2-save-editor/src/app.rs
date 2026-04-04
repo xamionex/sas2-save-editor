@@ -211,7 +211,7 @@ impl SaveEditorApp {
         }
 
         let new_idx = max_idx + 1;
-        let backup_name = format!("{}.{}.bak", file_stem, new_idx);
+        let backup_name = format!("{}.slv.{}.bak", file_stem, new_idx);
         let backup_path = parent.join(backup_name);
 
         match fs::copy(original_path, &backup_path) {
@@ -1803,6 +1803,7 @@ impl SaveEditorApp {
     /// - Remaps equipped item indices accordingly
     /// - Clamps upgrade values to 0-10
     /// - Clamps item counts to 999
+    /// - Clear all equipped items to avoid bad indices
     fn sanitize_for_vanilla(&self, save: &mut SaveData) {
         let Some(catalog) = &self.catalog else {
             eprintln!("Cannot sanitize: loot catalog not loaded");
@@ -1810,38 +1811,21 @@ impl SaveEditorApp {
         };
         let max_valid_idx = catalog.loot_defs.len();
 
-        // Build a mapping from old index to new index for items that survive
-        let mut old_to_new = std::collections::HashMap::new();
+        // Rebuild inventory, keeping only valid vanilla items with positive count
         let mut new_inventory = Vec::new();
-
-        for (old_idx, item) in save.equipment.inventory_items.iter().enumerate() {
-            // Keep only items whose loot_idx is within vanilla catalog
-            if (item.loot_idx as usize) < max_valid_idx {
-                // Clamp upgrade to vanilla max (10)
+        for item in &save.equipment.inventory_items {
+            if (item.loot_idx as usize) < max_valid_idx && item.count > 0 {
                 let mut sanitized = item.clone();
-                if sanitized.upgrade > 10 {
-                    sanitized.upgrade = 10;
-                }
-                // Clamp count to 999
-                if sanitized.count > 999 {
-                    sanitized.count = 999;
-                }
-                old_to_new.insert(old_idx, new_inventory.len());
+                if sanitized.upgrade > 10 { sanitized.upgrade = 10; }
+                if sanitized.count > 999 { sanitized.count = 999; }
                 new_inventory.push(sanitized);
             }
         }
-
         save.equipment.inventory_items = new_inventory;
 
-        // Remap equipped items
+        // Clear all equipped items to avoid bad indices
         for slot in &mut save.equipment.equipped_items {
-            if *slot >= 0 {
-                if let Some(&new_idx) = old_to_new.get(&(*slot as usize)) {
-                    *slot = new_idx as i32;
-                } else {
-                    *slot = -1; // item was removed
-                }
-            }
+            *slot = -1;
         }
     }
 
@@ -1887,27 +1871,34 @@ impl SaveEditorApp {
     }
 
     pub fn show_convert_save_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
+        let mut modded = "Modded";
+
         if save.version <= 100 {
-            ui.label("This save is already vanilla. No conversion needed.");
-            return;
+            modded = "Vanilla";
         }
 
         ui.heading("Convert Modded Save to Vanilla");
         ui.separator();
-        ui.label(format!("Current save version: {} (modded)", save.version));
-        ui.label("Select target vanilla version:");
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.conversion_target_version, 18, "Version 18");
-            ui.selectable_value(&mut self.conversion_target_version, 19, "Version 19");
-        });
+        ui.label(format!("Current save version: {} ({modded})", save.version));
+        //ui.label("Select target vanilla version:");
+        //ui.horizontal(|ui| {
+        //    ui.selectable_value(&mut self.conversion_target_version, 18, "Version 18");
+        //    ui.selectable_value(&mut self.conversion_target_version, 19, "Version 19");
+        //});
         ui.separator();
         ui.label("Warning: Mod only item data will be lost. (artifact seed, rarity, etc.)");
         ui.label("The resulting save should be compatible with the unmodded game.");
+        ui.label("Note: Everything will be unequipped as to not cause missing index errors.");
         ui.label("This was only tested with Saltguard. Make backups.");
-        ui.separator();
         if ui.button("Convert and Save As...").clicked() {
             self.convert_to_vanilla(save, self.conversion_target_version);
         }
+        ui.separator();
+        if ui.button("Sanitize Current Save").clicked() {
+            self.sanitize_for_vanilla(save);
+        }
+        ui.label("This removes invalid item count items and unequips everything");
+        ui.label("It's intended to be used when you encounter your save crashing\nExample: When you remove an item from your inventory.");
     }
 }
 
@@ -1976,10 +1967,7 @@ impl eframe::App for SaveEditorApp {
                         ui.selectable_value(&mut self.active_tab, Tab::Flags, "Flags");
                         ui.selectable_value(&mut self.active_tab, Tab::Bestiary, "Bestiary");
                         ui.selectable_value(&mut self.active_tab, Tab::Faction, "Faction");
-                        // Only show ConvertSave tab if the save is modded
-                        if save.version > 100 {
-                            ui.selectable_value(&mut self.active_tab, Tab::ConvertSave, "Convert Save");
-                        }
+                        ui.selectable_value(&mut self.active_tab, Tab::ConvertSave, "Convert Save");
                     });
                 });
 
@@ -1996,6 +1984,7 @@ impl eframe::App for SaveEditorApp {
                     Tab::Faction => self.show_faction_ui(ui, save),
                     Tab::ConvertSave => self.show_convert_save_ui(ui, save),
                 }
+
                 if self.conversion_just_happened {
                     // Replace save_taken with the new save data
                     save_taken = self.save_data.take();
