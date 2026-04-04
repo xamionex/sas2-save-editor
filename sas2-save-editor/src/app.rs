@@ -65,6 +65,7 @@ pub struct SaveEditorApp {
     pub atlas_width: u32,
     pub atlas_height: u32,
     pub item_search_filter: String,
+    pub inventory_search_filter: String,
     pub equipment_subtab: EquipmentSubTab,
     pub selected_equipment_item: Option<usize>,
     pub selected_catalog_item: Option<usize>,
@@ -115,6 +116,7 @@ impl Default for SaveEditorApp {
             atlas_width: 0,
             atlas_height: 0,
             item_search_filter: String::new(),
+            inventory_search_filter: String::new(),
             equipment_subtab: EquipmentSubTab::Inventory,
             selected_equipment_item: None,
             selected_catalog_item: None,
@@ -555,6 +557,11 @@ impl SaveEditorApp {
     }
 
     fn show_inventory_or_stockpile(&mut self, ui: &mut Ui, save: &mut SaveData) {
+        ui.horizontal(|ui| {
+            ui.label("Search:");
+            ui.text_edit_singleline(&mut self.inventory_search_filter);
+        });
+
         let stockpile_mode = self.equipment_subtab == EquipmentSubTab::Stockpile;
         let items = &mut save.equipment.inventory_items;
 
@@ -562,7 +569,32 @@ impl SaveEditorApp {
             .iter()
             .enumerate()
             .filter_map(|(idx, item)| {
-                if item.stock_piled == stockpile_mode {
+                // Only include if stockpile mode matches
+                if item.stock_piled != stockpile_mode {
+                    return None;
+                }
+
+                // Search filter
+                let filter = &self.inventory_search_filter;
+                let matches_search = if filter.is_empty() {
+                    true
+                } else {
+                    let filter_lower = filter.to_lowercase();
+                    let id_match = item.loot_idx.to_string().to_lowercase().contains(&filter_lower);
+                    let name_match = if let Some(catalog) = &self.catalog {
+                        if let Some(def) = catalog.loot_defs.get(item.loot_idx as usize) {
+                            def.name.to_lowercase().contains(&filter_lower) ||
+                                def.title.first().map(|t| t.to_lowercase().contains(&filter_lower)).unwrap_or(false)
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+                    id_match || name_match
+                };
+
+                if matches_search {
                     Some(idx)
                 } else {
                     None
@@ -764,10 +796,13 @@ impl SaveEditorApp {
 
             for (idx, def) in catalog.loot_defs.iter().enumerate() {
                 if !item_search_filter.is_empty()
-                    && !def
-                    .name
-                    .to_lowercase()
-                    .contains(&item_search_filter.to_lowercase())
+                    && !(def
+                        .name
+                        .to_lowercase()
+                        .contains(&item_search_filter.to_lowercase())
+                    || def.title.first().map(|t| t.to_lowercase().contains(&item_search_filter.to_lowercase())).unwrap_or(false)
+                    || idx.to_string().to_lowercase()
+                        .contains(&item_search_filter.to_lowercase()))
                 {
                     continue;
                 }
