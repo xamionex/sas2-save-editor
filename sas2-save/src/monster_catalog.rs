@@ -126,28 +126,34 @@ impl MonsterCatalog {
     pub fn load_from_bytes(data: &[u8]) -> Result<Self, SaveError> {
         let mut reader = Cursor::new(data);
         let count = reader.read_i32::<LittleEndian>()?;
-        #[cfg(debug_assertions)]
-        eprintln!("=== Starting to parse {} Monsters ===", count);
+        crate::log_monster!("=== Starting to parse {} Monsters ===", count);
 
         let mut monsters = Vec::with_capacity(count as usize);
         let mut by_name = HashMap::with_capacity(count as usize);
 
         for idx in 0..count {
-            #[cfg(debug_assertions)]
-            eprintln!(
+            crate::log_monster!(
                 "\n--- Monster {} at position {} ---",
                 idx,
                 reader.stream_position()?
             );
 
             let def = MonsterDef::read(&mut reader)?;
-            #[cfg(debug_assertions)]
-            eprintln!(
+
+            crate::log_monster!(
+                "  name: \"{}\", type: {}, sub_type: {}, img: {}",
+                def.name, def.type_, def.sub_type, def.img
+            );
+            crate::log_monster!(
+                "  field_count: {}, flag_count: {}",
+                def.fields.len(), def.flags.len()
+            );
+            crate::log_monster!(
                 "--- Finished Monster {} at position {} ---\n",
                 idx,
                 reader.stream_position()?
             );
-
+            
             by_name.insert(def.name.clone(), idx);
             monsters.push(def);
         }

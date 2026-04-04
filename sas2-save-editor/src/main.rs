@@ -10,8 +10,16 @@ fn main() -> eframe::Result<()> {
     #[cfg(not(debug_assertions))]
     hide_console();
 
-    let options = eframe::NativeOptions::default();
+    // Parse command line arguments
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|arg| arg == "--hide-lootdef-logging") {
+        sas2_save::set_loot_logging_enabled(false);
+    }
+    if args.iter().any(|arg| arg == "--hide-monster-logging") {
+        sas2_save::set_monster_logging_enabled(false);
+    }
 
+    let options = eframe::NativeOptions::default();
     eframe::run_native(
         "SaS2 Save Editor",
         options,
