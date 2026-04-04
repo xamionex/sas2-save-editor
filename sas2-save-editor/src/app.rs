@@ -97,6 +97,9 @@ pub struct SaveEditorApp {
     // hash
     pub hash_edit_string: String,
     pub use_custom_hash: bool,
+
+    // stats
+    pub adjust_black_pearls_on_level_change: bool,
 }
 
 impl Default for SaveEditorApp {
@@ -140,6 +143,7 @@ impl Default for SaveEditorApp {
             conversion_just_happened: false,
             hash_edit_string: String::new(),
             use_custom_hash: false,
+            adjust_black_pearls_on_level_change: false,
         };
 
         if let Some(game_path) = &app.config.game_path {
@@ -380,6 +384,53 @@ impl SaveEditorApp {
         }
     }
 
+    fn sync_black_pearls_with_level(&self, save: &mut SaveData, old_level: i32, new_level: i32) {
+        let delta = new_level - old_level;
+        if delta == 0 {
+            return;
+        }
+
+        let Some(catalog) = &self.catalog else { return };
+        let Some(idx) = catalog.black_pearl_index else {
+            #[cfg(debug_assertions)]
+            eprintln!("[ERROR] Black Starstone index missing in catalog, cannot sync");
+            return;
+        };
+
+        // Find existing Black Starstone (non-stockpiled)
+        let item_pos = save.equipment.inventory_items.iter_mut()
+            .find(|item| item.loot_idx == idx as i32 && !item.stock_piled);
+
+        if let Some(item) = item_pos {
+            let new_count = item.count + delta;
+            if new_count <= 0 {
+                save.equipment.inventory_items.retain(|i| !(i.loot_idx == idx as i32 && !i.stock_piled));
+                #[cfg(debug_assertions)]
+                eprintln!("[DEBUG] Removed Black Starstone stack (count became {})", new_count);
+            } else {
+                item.count = new_count;
+                #[cfg(debug_assertions)]
+                eprintln!("[DEBUG] Level {} -> {}, delta {}, new count {}", old_level, new_level, delta, new_count);
+            }
+        } else if delta > 0 {
+            save.equipment.inventory_items.push(Item {
+                loot_idx: idx as i32,
+                count: delta,
+                upgrade: 0,
+                stock_piled: false,
+                artifact_seed: -1,
+                item_version: 0,
+                rarity: 1,
+            });
+            #[cfg(debug_assertions)]
+            eprintln!("[DEBUG] Created new Black Starstone stack with count {}", delta);
+        } else {
+            // delta < 0 but no stack exists – cannot remove, ignore
+            #[cfg(debug_assertions)]
+            eprintln!("[DEBUG] Cannot remove {} Black Starstones: no stack present", -delta);
+        }
+    }
+
     pub fn show_stats_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
         if self.stats_dirty {
             if let Some(catalog) = &self.skilltree_catalog {
@@ -395,8 +446,18 @@ impl SaveEditorApp {
             ui.text_edit_singleline(&mut save.name);
         });
         ui.horizontal(|ui| {
+            let old_level = save.stats.level;
             ui.label("Level:");
-            ui.add(egui::DragValue::new(&mut save.stats.level).speed(self.config.drag_value_sensitivity).range(1..=999999));
+            if ui.add(egui::DragValue::new(&mut save.stats.level)
+                .speed(self.config.drag_value_sensitivity)
+                .range(1..=999999)).changed()
+            {
+                if self.adjust_black_pearls_on_level_change {
+                    self.sync_black_pearls_with_level(save, old_level, save.stats.level);
+                }
+                self.stats_dirty = true;
+            }
+            ui.checkbox(&mut self.adjust_black_pearls_on_level_change, "Give/Remove Black Starstones when changing");
         });
         self.add_ng_level_label(ui, save);
         ui.horizontal(|ui| {
