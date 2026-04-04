@@ -132,6 +132,7 @@ impl MonsterCatalog {
         let mut by_name = HashMap::with_capacity(count as usize);
 
         for idx in 0..count {
+            #[cfg(debug_assertions)]
             crate::log_monster!(
                 "\n--- Monster {} at position {} ---",
                 idx,
@@ -140,14 +141,17 @@ impl MonsterCatalog {
 
             let def = MonsterDef::read(&mut reader)?;
 
+            #[cfg(debug_assertions)]
             crate::log_monster!(
                 "  name: \"{}\", type: {}, sub_type: {}, img: {}",
                 def.name, def.type_, def.sub_type, def.img
             );
+            #[cfg(debug_assertions)]
             crate::log_monster!(
                 "  field_count: {}, flag_count: {}",
                 def.fields.len(), def.flags.len()
             );
+            #[cfg(debug_assertions)]
             crate::log_monster!(
                 "--- Finished Monster {} at position {} ---\n",
                 idx,

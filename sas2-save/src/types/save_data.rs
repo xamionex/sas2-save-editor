@@ -61,9 +61,7 @@ impl SaveData {
         let flags = PlayerFlags::read(&mut payload_reader, base_version)?;
 
         // For versions < 19 (vanilla only), skip 10 ints
-        let mut skipped_legacy_padding = false;
         if base_version < 19 && !is_mod {
-            skipped_legacy_padding = true;
             for _ in 0..10 {
                 payload_reader.read_i32::<LittleEndian>()?;
             }
@@ -94,7 +92,7 @@ impl SaveData {
             println!("Base Version:         {}", base_version);
             println!("Is Modded Format:     {}", is_mod);
             println!("XOR Key Used:         {}", xor_key);
-            println!("Skipped V18 Padding:  {}", skipped_legacy_padding);
+            println!("Skipped V18 Padding:  {}", base_version < 19 && !is_mod);
             println!("----------------------------------------");
             println!("Inventory Count:      {}", equipment.inventory_items.len());
             println!("Active Flags Count:   {}", flags.flags.len());
