@@ -13,6 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use sas2_save::types::faction::PlayerFaction;
 use sas2_save::types::ng_level;
+use sas2_save::xnb_loader::load_texture_from_path;
 
 #[derive(Clone)]
 pub struct XnbNode {
@@ -97,12 +98,6 @@ pub struct SaveEditorApp {
     // hash
     pub hash_edit_string: String,
     pub use_custom_hash: bool,
-
-    // stats
-    pub adjust_black_pearls_on_level_change: bool,
-    pub sync_black_starstones: bool,
-    pub add_gray_starstones: bool,
-    pub remove_gray_starstones: bool,
 }
 
 impl Default for SaveEditorApp {
@@ -146,10 +141,6 @@ impl Default for SaveEditorApp {
             conversion_just_happened: false,
             hash_edit_string: String::new(),
             use_custom_hash: false,
-            adjust_black_pearls_on_level_change: false,
-            sync_black_starstones: false,
-            add_gray_starstones: false,
-            remove_gray_starstones: false,
         };
 
         if let Some(game_path) = &app.config.game_path {
@@ -317,7 +308,7 @@ impl SaveEditorApp {
             eprintln!("items.xnb not found at {:?}", items_xnb);
             return;
         }
-        match sas2_save::xnb_loader::load_texture_from_path(items_xnb.to_str().unwrap()) {
+        match load_texture_from_path(items_xnb.to_str().unwrap()) {
             Ok(img) => {
                 let width = img.width();
                 let height = img.height();
@@ -398,8 +389,6 @@ impl SaveEditorApp {
             self.stats_dirty = false;
         }
 
-        ui.heading("Player Stats");
-        ui.separator();
         ui.horizontal(|ui| {
             ui.label("Player Name:");
             ui.text_edit_singleline(&mut save.name);
@@ -411,7 +400,7 @@ impl SaveEditorApp {
                 .speed(self.config.drag_value_sensitivity)
                 .range(1..=999999)).changed()
             {
-                if self.adjust_black_pearls_on_level_change {
+                if self.config.adjust_black_pearls_on_level_change {
                     let delta = save.stats.level - old_level;
                     if delta != 0 {
                         Self::adjust_startstone(save, self.catalog.as_ref().and_then(|c| c.black_pearl_index), delta);
@@ -419,7 +408,7 @@ impl SaveEditorApp {
                 }
                 self.stats_dirty = true;
             }
-            ui.checkbox(&mut self.adjust_black_pearls_on_level_change, "Sync Black Starstones when changing");
+            ui.checkbox(&mut self.config.adjust_black_pearls_on_level_change, "Sync Black Starstones when changing");
         });
         self.add_ng_level_label(ui, save);
         ui.horizontal(|ui| {
@@ -503,9 +492,6 @@ impl SaveEditorApp {
     }
 
     pub fn show_equipment_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
-        ui.heading("Equipment");
-        ui.separator();
-
         // Ensure atlas is loaded if we have a game folder
         if self.item_atlas.is_none() {
             if let Some(game_path) = self.config.game_path.clone() {
@@ -1028,9 +1014,6 @@ impl SaveEditorApp {
     }
 
     pub fn show_flags_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
-        ui.heading("Player Flags");
-        ui.separator();
-
         // Editable flags list
         ui.label("Flags:");
         ScrollArea::vertical()
@@ -1091,9 +1074,6 @@ impl SaveEditorApp {
     }
 
     pub fn show_bestiary_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
-        ui.heading("Bestiary");
-        ui.separator();
-
         ScrollArea::vertical()
             .max_height(400.0)
             .auto_shrink([false; 2])
@@ -1119,9 +1099,6 @@ impl SaveEditorApp {
     }
 
     pub fn show_cosmetics_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
-        ui.heading("Cosmetics");
-        ui.separator();
-
         type NameFn = fn(usize) -> Option<&'static str>;
 
         let hair_choices: Vec<(usize, &'static str)> = {
@@ -1364,12 +1341,23 @@ impl SaveEditorApp {
         }
     }
 
+    fn calculate_total_spent_pearls(save: &SaveData, catalog: &SkillTreeCatalog) -> i32 {
+        let mut total = 0;
+        for node in &catalog.nodes {
+            if let Some(&unlocked_level) = save.stats.tree_unlocks.get(node.id) {
+                // Multiply the node's base cost by how many times it's been upgraded
+                total += node.cost * unlocked_level;
+            }
+        }
+        total
+    }
+
     pub fn show_skilltree_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
+        // TODO: Skill tree requires this but I don't like how it works right now
+        //self.load_atlas(self.config.game_path.clone().unwrap().as_path(), ui.ctx());
+
         let black_idx = self.catalog.as_ref().and_then(|c| c.black_pearl_index);
         let gray_idx = self.catalog.as_ref().and_then(|c| c.gray_pearl_index);
-
-        ui.heading("Skill Tree");
-        ui.separator();
 
         // Ensure texture/catalog are loaded
         if self.skilltree_texture.is_none() && self.skilltree_catalog.is_some() {
@@ -1380,7 +1368,7 @@ impl SaveEditorApp {
             }
         }
 
-        let catalog = match &self.skilltree_catalog {
+        let skilltreecatalog = match &self.skilltree_catalog {
             Some(c) => c,
             None => {
                 ui.label("Skill tree catalog not loaded.");
@@ -1417,9 +1405,64 @@ impl SaveEditorApp {
             ui.label(egui::RichText::new("Middle Click=Toggle Max").weak());
         });
         ui.horizontal(|ui| {
-            ui.checkbox(&mut self.sync_black_starstones, "Sync Black Starstones");
-            ui.checkbox(&mut self.add_gray_starstones, "Add Gray Starstones");
-            ui.checkbox(&mut self.remove_gray_starstones, "Remove Gray Starstones");
+            if ui.checkbox(&mut self.config.sync_black_starstones, "Sync Black Starstones").changed() {
+                self.config.save();
+            }
+            if ui.checkbox(&mut self.config.add_gray_starstones, "Add Gray Starstones on upgrade").changed() {
+                self.config.save();
+            }
+            if ui.checkbox(&mut self.config.remove_gray_starstones, "Remove Gray Starstones on downgrade").changed() {
+                self.config.save();
+            }
+        });
+
+        ui.horizontal(|ui| {
+            let total_spent = Self::calculate_total_spent_pearls(save, skilltreecatalog);
+            let color = if total_spent > save.stats.level - 1 {
+                egui::Color32::RED
+            } else {
+                egui::Color32::GREEN
+            };
+
+            ui.checkbox(&mut self.config.account_for_level, "Account for level/points");
+            ui.label(egui::RichText::new(format!(
+                "Points Spent: {} / {}",
+                total_spent,
+                save.stats.level - 1
+            )).color(color));
+
+            let atlas = self.item_atlas.as_ref();
+            let atlas_w = self.atlas_width as f32;
+            let atlas_h = self.atlas_height as f32;
+            let catalog = self.catalog.as_ref();
+            let icon_size = self.config.item_icon_size * 0.5;
+
+            for (idx_opt, label) in [(black_idx, "Black"), (gray_idx, "Gray")] {
+                if let (Some(idx), Some(cat), Some(tex)) = (idx_opt, catalog, atlas) {
+                    if let Some(def) = cat.loot_defs.get(idx) {
+                        // Manual UV calculation to avoid borrowing 'self' inside the closure
+                        let x = (def.img as u32 % 32) * 128;
+                        let y = (def.img as u32 / 32) * 128;
+                        let uv = Rect::from_min_max(
+                            pos2(x as f32 / atlas_w, y as f32 / atlas_h),
+                            pos2((x + 128) as f32 / atlas_w, (y + 128) as f32 / atlas_h),
+                        );
+
+                        ui.separator();
+                        ui.add(egui::Image::from_texture(tex)
+                            .uv(uv)
+                            .fit_to_exact_size(egui::vec2(icon_size, icon_size)))
+                            .on_hover_text(label);
+
+                        let count = save.equipment.inventory_items.iter()
+                            .find(|i| i.loot_idx == idx as i32)
+                            .map(|i| i.count)
+                            .unwrap_or(0);
+
+                        ui.label(egui::RichText::new(count.to_string()).strong());
+                    }
+                }
+            }
         });
         ui.separator();
 
@@ -1439,7 +1482,7 @@ impl SaveEditorApp {
                 let mut max_x = f32::MIN;
                 let mut min_y = f32::MAX;
                 let mut max_y = f32::MIN;
-                for node in &catalog.nodes {
+                for node in &skilltreecatalog.nodes {
                     min_x = min_x.min(node.loc_x);
                     max_x = max_x.max(node.loc_x);
                     min_y = min_y.min(node.loc_y);
@@ -1481,11 +1524,11 @@ impl SaveEditorApp {
             };
 
             // Draw connections
-            for node in &catalog.nodes {
+            for node in &skilltreecatalog.nodes {
                 let start = to_screen(node.loc_x, node.loc_y);
                 for &parent_id in &node.parents {
                     if parent_id >= 0 {
-                        if let Some(parent) = catalog.nodes.get(parent_id as usize) {
+                        if let Some(parent) = skilltreecatalog.nodes.get(parent_id as usize) {
                             let end = to_screen(parent.loc_x, parent.loc_y);
                             let node_unlocked = save.stats.tree_unlocks[node.id] > 0 || save.stats.class_unlocks.contains(&(node.id as i32));
                             let parent_unlocked = save.stats.tree_unlocks[parent_id as usize] > 0 || save.stats.class_unlocks.contains(&(parent_id));
@@ -1505,9 +1548,12 @@ impl SaveEditorApp {
             let tex_size = texture.size_vec2();
             let tile_size = 128.0;
             let tiles_per_row = (tex_size.x / tile_size) as i32;
+            let total_spent = Self::calculate_total_spent_pearls(save, skilltreecatalog);
+            let level_limit = save.stats.level - 1;
+            let can_upgrade = !self.config.account_for_level || total_spent < level_limit;
 
             // Draw nodes
-            for node in &catalog.nodes {
+            for node in &skilltreecatalog.nodes {
                 let screen_pos = to_screen(node.loc_x, node.loc_y);
                 let base_icon_size = 64.0 * self.skilltree_zoom;
                 let zoom_out_factor = 1.0 + (0.5 - self.skilltree_zoom).max(0.0) * 0.8333;
@@ -1581,30 +1627,28 @@ impl SaveEditorApp {
                 let modifiers = node_response.ctx.input(|i| i.modifiers);
 
                 // Add point
-                let current = save.stats.tree_unlocks[node.id];
-                let max_level = node.max_unlock();
                 if single_click && modifiers.shift {
-                    if current < max_level {
-                        save.stats.tree_unlocks[node.id] = current + 1;
+                    if current_level < max_level && can_upgrade {
+                        save.stats.tree_unlocks[node.id] = current_level + 1;
                         self.stats_dirty = true;
                     }
-                    if self.sync_black_starstones {
+                    if self.config.sync_black_starstones {
                         Self::adjust_startstone(save, black_idx, -1);
                     }
-                    if self.add_gray_starstones {
+                    if self.config.add_gray_starstones {
                         Self::adjust_startstone(save, gray_idx, 1);
                     }
                 }
                 // Remove point
                 else if node_response.secondary_clicked() {
-                    if current > 0 {
-                        save.stats.tree_unlocks[node.id] = current - 1;
+                    if current_level > 0 {
+                        save.stats.tree_unlocks[node.id] = current_level - 1;
                         self.stats_dirty = true;
                     }
-                    if self.sync_black_starstones {
+                    if self.config.sync_black_starstones {
                         Self::adjust_startstone(save, black_idx, 1);
                     }
-                    if self.remove_gray_starstones {
+                    if self.config.remove_gray_starstones {
                         Self::adjust_startstone(save, gray_idx, -1);
                     }
                 }
@@ -1614,24 +1658,40 @@ impl SaveEditorApp {
                 }
                 // Toggle max level on middle click
                 else if !single_click && middle_click {
-                    if current == max_level {
-                        if self.sync_black_starstones {
-                            Self::adjust_startstone(save, black_idx, -current_level);
+                    if current_level > 0 {
+                        // to 0
+                        // Adds back used black starstones
+                        // Removes gray starstones
+                        if self.config.sync_black_starstones {
+                            Self::adjust_startstone(save, black_idx, current_level);
                         }
-                        if self.add_gray_starstones {
-                            Self::adjust_startstone(save, gray_idx, current_level);
+                        if self.config.remove_gray_starstones {
+                            Self::adjust_startstone(save, gray_idx, -current_level);
                         }
                         save.stats.tree_unlocks[node.id] = 0;
                         self.stats_dirty = true;
-                    } else {
-                        if self.sync_black_starstones {
-                            Self::adjust_startstone(save, black_idx, -max_level);
+                    }
+                    else {
+                        // to max
+                        // Uses up black starstones
+                        // Adds gray starstones
+                        let points_to_add = if self.config.account_for_level {
+                            let available = (level_limit - total_spent).max(0);
+                            max_level.min(available)
+                        } else {
+                            max_level
+                        };
+
+                        if points_to_add > 0 {
+                            save.stats.tree_unlocks[node.id] = points_to_add;
+                            self.stats_dirty = true;
+                            if self.config.sync_black_starstones {
+                                Self::adjust_startstone(save, black_idx, -points_to_add);
+                            }
+                            if self.config.add_gray_starstones {
+                                Self::adjust_startstone(save, gray_idx, points_to_add);
+                            }
                         }
-                        if self.remove_gray_starstones {
-                            Self::adjust_startstone(save, gray_idx, max_level);
-                        }
-                        save.stats.tree_unlocks[node.id] = max_level;
-                        self.stats_dirty = true;
                     }
                 }
 
@@ -1673,7 +1733,7 @@ impl SaveEditorApp {
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     if let Some(id) = self.selected_skill_node {
-                        if let Some(node) = catalog.nodes.get(id) {
+                        if let Some(node) = skilltreecatalog.nodes.get(id) {
                             ui.heading(&node.titles[0]);
                             ui.add_space(4.0);
                             ui.label(&node.descriptions[0]);
@@ -1688,7 +1748,7 @@ impl SaveEditorApp {
                                 ui.label("Unlock level:");
                                 if ui.add(egui::DragValue::new(&mut val).range(0..=node.max_unlock()).speed(0.01)).changed() {
                                     save.stats.tree_unlocks[node.id] = val;
-                                    SaveEditorApp::recalc_player_stats(save, catalog);
+                                    SaveEditorApp::recalc_player_stats(save, skilltreecatalog);
                                 }
                             });
 
@@ -1696,7 +1756,7 @@ impl SaveEditorApp {
                             ui.label("Parents:");
                             for &p in &node.parents {
                                 if p >= 0 {
-                                    if let Some(parent) = catalog.nodes.get(p as usize) {
+                                    if let Some(parent) = skilltreecatalog.nodes.get(p as usize) {
                                         ui.label(format!("- {}", parent.titles[0]));
                                     }
                                 }
@@ -1706,13 +1766,13 @@ impl SaveEditorApp {
                             ui.horizontal(|ui| {
                                 if ui.button("Set as Class Unlock 1").clicked() {
                                     save.stats.class_unlocks[0] = node.id as i32;
-                                    SaveEditorApp::recalc_player_stats(save, catalog);
+                                    SaveEditorApp::recalc_player_stats(save, skilltreecatalog);
                                 }
                             });
                             ui.horizontal(|ui| {
                                 if ui.button("Set as Class Unlock 2").clicked() {
                                     save.stats.class_unlocks[1] = node.id as i32;
-                                    SaveEditorApp::recalc_player_stats(save, catalog);
+                                    SaveEditorApp::recalc_player_stats(save, skilltreecatalog);
                                 }
                             });
                             ui.horizontal(|ui| {
@@ -1734,8 +1794,8 @@ impl SaveEditorApp {
                             ui.label(egui::RichText::new("Class Unlocks (always active)").strong());
                             for i in 0..3 {
                                 let class_id = save.stats.class_unlocks[i];
-                                let name = if class_id >= 0 && (class_id as usize) < catalog.nodes.len() {
-                                    catalog.nodes[class_id as usize].titles[0].clone()
+                                let name = if class_id >= 0 && (class_id as usize) < skilltreecatalog.nodes.len() {
+                                    skilltreecatalog.nodes[class_id as usize].titles[0].clone()
                                 } else {
                                     "None".to_string()
                                 };
@@ -1754,9 +1814,6 @@ impl SaveEditorApp {
     }
 
     pub fn show_faction_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
-        ui.heading("Player Faction");
-        ui.separator();
-
         // Determine current faction from flags
         let current_faction = PlayerFaction::from_flags(&save.flags.flags);
         let mut selected = current_faction;
@@ -1925,8 +1982,6 @@ impl SaveEditorApp {
             modded = "Vanilla";
         }
 
-        ui.heading("Convert Modded Save to Vanilla");
-        ui.separator();
         ui.label(format!("Current save version: {} ({modded})", save.version));
         //ui.label("Select target vanilla version:");
         //ui.horizontal(|ui| {
@@ -1935,7 +1990,7 @@ impl SaveEditorApp {
         //});
         ui.separator();
         ui.label("Warning: Mod only item data will be lost. (artifact seed, rarity, etc.)");
-        ui.label("The resulting save should be compatible with the unmodded game.");
+        ui.label("The resulting save should be compatible with the vanilla game.");
         ui.label("Note: Everything will be unequipped as to not cause missing index errors.");
         ui.label("This was only tested with Saltguard. Make backups.");
         if ui.button("Convert and Save As...").clicked() {
@@ -2015,7 +2070,7 @@ impl eframe::App for SaveEditorApp {
                         ui.selectable_value(&mut self.active_tab, Tab::Flags, "Flags");
                         ui.selectable_value(&mut self.active_tab, Tab::Bestiary, "Bestiary");
                         ui.selectable_value(&mut self.active_tab, Tab::Faction, "Faction");
-                        ui.selectable_value(&mut self.active_tab, Tab::ConvertSave, "Convert Save");
+                        ui.selectable_value(&mut self.active_tab, Tab::ConvertSave, "Convert modded to vanilla save");
                     });
                 });
 
