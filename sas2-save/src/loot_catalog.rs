@@ -40,6 +40,7 @@ pub struct LootCatalog {
     pub loot_defs: Vec<LootDef>,
     pub by_name: HashMap<String, usize>,
     pub black_pearl_index: Option<usize>,
+    pub gray_pearl_index: Option<usize>,
 }
 
 impl LootCatalog {
@@ -76,10 +77,18 @@ impl LootCatalog {
                     .position(|def| def.title.iter().any(|t| t.contains("Black Starstone")))
             });
 
+        let gray_pearl_index = defs.iter()
+            .position(|def| def.name == "gray_pearl")
+            .or_else(|| {
+                defs.iter()
+                    .position(|def| def.title.iter().any(|t| t.contains("Gray Starstone")))
+            });
+
         Ok(LootCatalog {
             loot_defs: defs,
             by_name,
             black_pearl_index,
+            gray_pearl_index,
         })
     }
 }
