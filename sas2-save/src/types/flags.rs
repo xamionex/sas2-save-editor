@@ -1,8 +1,8 @@
-use crate::utils::{read_string, write_string, SaveError};
+use crate::types::ng_level;
 use crate::types::serializable::BinarySerializable;
+use crate::utils::{read_string, write_string, SaveError};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{Read, Write};
-use crate::types::ng_level;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerFlags {

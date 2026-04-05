@@ -1,5 +1,5 @@
-use crate::utils::SaveError;
 use crate::types::serializable::BinarySerializable;
+use crate::utils::SaveError;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{Read, Write};
 

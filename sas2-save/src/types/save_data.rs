@@ -1,16 +1,16 @@
-use crate::utils::{read_string, write_string, xor_data, SaveError};
-use crate::types::serializable::BinarySerializable;
-use crate::types::stats::Stats;
+use crate::types::bestiary::Bestiary;
 use crate::types::equipment::Equipment;
 use crate::types::flags::PlayerFlags;
-use crate::types::bestiary::Bestiary;
+use crate::types::serializable::BinarySerializable;
+use crate::types::stats::Stats;
+use crate::utils::{read_string, write_string, xor_data, SaveError};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use md5;
 use std::io::{Cursor, Write};
 
 #[derive(Debug, Clone)]
 pub struct SaveData {
-    pub version: i32,      // original version from file (>100 for saltguard)
+    pub version: i32, // original version from file (>100 for saltguard)
     pub name: String,
     pub stats: Stats,
     pub equipment: Equipment,
@@ -33,7 +33,11 @@ impl SaveData {
             (raw_version - 100, 19)
         } else {
             // Vanilla: base version = raw_version, XOR key = raw_version for versions 18/19, else 0
-            let xor = if raw_version == 18 || raw_version == 19 { raw_version } else { 0 };
+            let xor = if raw_version == 18 || raw_version == 19 {
+                raw_version
+            } else {
+                0
+            };
             (raw_version, xor)
         };
 
@@ -138,7 +142,14 @@ impl SaveData {
         let (base_version, xor_key) = if raw_version > 100 {
             (raw_version - 100, 19)
         } else {
-            (raw_version, if raw_version == 18 || raw_version == 19 { raw_version } else { 0 })
+            (
+                raw_version,
+                if raw_version == 18 || raw_version == 19 {
+                    raw_version
+                } else {
+                    0
+                },
+            )
         };
 
         let is_mod = raw_version > 100;

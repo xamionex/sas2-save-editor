@@ -25,17 +25,24 @@ impl EyeCatalog {
                 (0, 228, 255, "Sapphire"),
                 (157, 157, 157, "Silver"),
             ];
-            entries.into_iter().map(|(r,g,b,name)| {
-                let avg = (r as u16 + g as u16 + b as u16) as f32 / 255.0 / 3.0;
-                let burnt_r = (avg * 0.7 * 255.0) as u8;
-                let burnt_g = (avg * 0.75 * 255.0) as u8;
-                let burnt_b = (avg * 0.8 * 255.0) as u8;
-                EyeColor {
-                    name: name.to_string(),
-                    r, g, b,
-                    burnt_r, burnt_g, burnt_b,
-                }
-            }).collect()
+            entries
+                .into_iter()
+                .map(|(r, g, b, name)| {
+                    let avg = (r as u16 + g as u16 + b as u16) as f32 / 255.0 / 3.0;
+                    let burnt_r = (avg * 0.7 * 255.0) as u8;
+                    let burnt_g = (avg * 0.75 * 255.0) as u8;
+                    let burnt_b = (avg * 0.8 * 255.0) as u8;
+                    EyeColor {
+                        name: name.to_string(),
+                        r,
+                        g,
+                        b,
+                        burnt_r,
+                        burnt_g,
+                        burnt_b,
+                    }
+                })
+                .collect()
         })
     }
 

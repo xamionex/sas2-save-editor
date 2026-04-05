@@ -14,18 +14,42 @@ impl CrimeCatalog {
             // These are the English names; the actual localized names are in LocStrings.
             // For the editor, we use the English names as they are commonly known.
             vec![
-                Crime { name: "Alchemy".to_string() },
-                Crime { name: "Arson".to_string() },
-                Crime { name: "Blasphemy".to_string() },
-                Crime { name: "Brigandry".to_string() },
-                Crime { name: "Drunkenness".to_string() },
-                Crime { name: "Forgery".to_string() },
-                Crime { name: "Heresy".to_string() },
-                Crime { name: "Lasciviousness".to_string() },
-                Crime { name: "Smuggling".to_string() },
-                Crime { name: "Sumptuousness".to_string() },
-                Crime { name: "Usury".to_string() },
-                Crime { name: "Vagrancy".to_string() },
+                Crime {
+                    name: "Alchemy".to_string(),
+                },
+                Crime {
+                    name: "Arson".to_string(),
+                },
+                Crime {
+                    name: "Blasphemy".to_string(),
+                },
+                Crime {
+                    name: "Brigandry".to_string(),
+                },
+                Crime {
+                    name: "Drunkenness".to_string(),
+                },
+                Crime {
+                    name: "Forgery".to_string(),
+                },
+                Crime {
+                    name: "Heresy".to_string(),
+                },
+                Crime {
+                    name: "Lasciviousness".to_string(),
+                },
+                Crime {
+                    name: "Smuggling".to_string(),
+                },
+                Crime {
+                    name: "Sumptuousness".to_string(),
+                },
+                Crime {
+                    name: "Usury".to_string(),
+                },
+                Crime {
+                    name: "Vagrancy".to_string(),
+                },
             ]
         })
     }

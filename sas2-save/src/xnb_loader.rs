@@ -3,9 +3,7 @@ use serde::Serialize;
 use std::fs;
 use std::io::Cursor;
 use std::path::Path;
-use xnb::{
-    BmFont, Effect, MaybeCompressedXNB, SoundEffect, SpriteFont, Texture2d, WindowSize,
-};
+use xnb::{BmFont, Effect, MaybeCompressedXNB, SoundEffect, SpriteFont, Texture2d, WindowSize};
 
 /// All asset types we can export.
 pub enum XnbAsset {
@@ -67,9 +65,7 @@ pub fn load_asset_from_xnb(path: &str) -> Result<XnbAsset, String> {
         "Microsoft.Xna.Framework.Content.SoundEffectReader" => {
             load_soundeffect_from_xnb(&data).map(XnbAsset::SoundEffect)
         }
-        "BmFont.XmlSourceReader" => {
-            load_bmfont_from_xnb(&data).map(XnbAsset::BmFont)
-        }
+        "BmFont.XmlSourceReader" => load_bmfont_from_xnb(&data).map(XnbAsset::BmFont),
         _ => Ok(XnbAsset::Unknown(data)),
     }
 }
@@ -82,8 +78,12 @@ pub fn load_texture_from_xnb(data: &[u8]) -> Result<RgbaImage, String> {
     }
 
     let mip_data = &texture.mip_data[0];
-    RgbaImage::from_raw(texture.width as u32, texture.height as u32, mip_data.clone())
-        .ok_or_else(|| "Failed to create RgbaImage".to_string())
+    RgbaImage::from_raw(
+        texture.width as u32,
+        texture.height as u32,
+        mip_data.clone(),
+    )
+    .ok_or_else(|| "Failed to create RgbaImage".to_string())
 }
 
 pub fn load_spritefont_from_xnb(data: &[u8]) -> Result<SpriteFont, String> {
@@ -174,7 +174,8 @@ pub fn export_asset_to_file(asset: XnbAsset, output_path: &Path) -> Result<(), S
 
             let json = serde_json::to_string_pretty(&serializable)
                 .map_err(|e| format!("Failed to serialize SpriteFont: {}", e))?;
-            fs::write(output_path, json).map_err(|e| format!("Failed to write font JSON: {}", e))?;
+            fs::write(output_path, json)
+                .map_err(|e| format!("Failed to write font JSON: {}", e))?;
 
             // Export internal font texture
             let texture = &font.texture;
@@ -185,11 +186,13 @@ pub fn export_asset_to_file(asset: XnbAsset, output_path: &Path) -> Result<(), S
             let img = RgbaImage::from_raw(
                 texture.width as u32,
                 texture.height as u32,
-                texture.mip_data[0].clone()
-            ).ok_or("Failed to create RGBA image from font texture")?;
+                texture.mip_data[0].clone(),
+            )
+            .ok_or("Failed to create RGBA image from font texture")?;
 
             let texture_path = output_path.with_extension("png");
-            img.save(&texture_path).map_err(|e| format!("Failed to save font texture: {}", e))?;
+            img.save(&texture_path)
+                .map_err(|e| format!("Failed to save font texture: {}", e))?;
 
             Ok(())
         }

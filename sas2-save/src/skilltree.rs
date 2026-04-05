@@ -1,14 +1,14 @@
 use crate::utils::read_string;
 use byteorder::{LittleEndian, ReadBytesExt};
-use std::io::{Cursor};
+use std::io::Cursor;
 
 #[derive(Debug, Clone)]
 pub struct SkillNode {
     pub id: usize,
     pub name: String,
-    pub titles: Vec<String>,        // 13 languages
-    pub descriptions: Vec<String>,         // 13 languages
-    pub base_descriptions: Vec<String>,    // 13 languages
+    pub titles: Vec<String>,            // 13 languages
+    pub descriptions: Vec<String>,      // 13 languages
+    pub base_descriptions: Vec<String>, // 13 languages
     pub node_type: i32,
     pub value: i32,
     pub cost: i32,
@@ -51,7 +51,9 @@ pub struct SkillTreeCatalog {
 impl SkillTreeCatalog {
     pub fn load_from_bytes(data: &[u8]) -> Result<Self, String> {
         let mut reader = Cursor::new(data);
-        let count = reader.read_i32::<LittleEndian>().map_err(|e| e.to_string())?;
+        let count = reader
+            .read_i32::<LittleEndian>()
+            .map_err(|e| e.to_string())?;
         let mut nodes = Vec::with_capacity(count as usize);
 
         for id in 0..count {
@@ -72,17 +74,29 @@ impl SkillTreeCatalog {
                 base_descriptions.push(read_string(&mut reader).map_err(|e| e.to_string())?);
             }
 
-            let node_type = reader.read_i32::<LittleEndian>().map_err(|e| e.to_string())?;
-            let value = reader.read_i32::<LittleEndian>().map_err(|e| e.to_string())?;
-            let cost = reader.read_i32::<LittleEndian>().map_err(|e| e.to_string())?;
+            let node_type = reader
+                .read_i32::<LittleEndian>()
+                .map_err(|e| e.to_string())?;
+            let value = reader
+                .read_i32::<LittleEndian>()
+                .map_err(|e| e.to_string())?;
+            let cost = reader
+                .read_i32::<LittleEndian>()
+                .map_err(|e| e.to_string())?;
 
             let mut parents = [0; 2];
             for i in 0..2 {
-                parents[i] = reader.read_i32::<LittleEndian>().map_err(|e| e.to_string())?;
+                parents[i] = reader
+                    .read_i32::<LittleEndian>()
+                    .map_err(|e| e.to_string())?;
             }
 
-            let loc_x = reader.read_f32::<LittleEndian>().map_err(|e| e.to_string())?;
-            let loc_y = reader.read_f32::<LittleEndian>().map_err(|e| e.to_string())?;
+            let loc_x = reader
+                .read_f32::<LittleEndian>()
+                .map_err(|e| e.to_string())?;
+            let loc_y = reader
+                .read_f32::<LittleEndian>()
+                .map_err(|e| e.to_string())?;
 
             nodes.push(SkillNode {
                 id: id as usize,
@@ -110,8 +124,6 @@ impl SkillTreeCatalog {
 
 // Icon mapping from node_type to texture atlas index (from SkillNode.skillImg in C#)
 pub const SKILL_IMG: [i32; 32] = [
-    22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
-    10, 12, 11, 40, 43, 41, 39, 14, 46, 42,
-    13, 15, 45, 47, 44, 37, 34, 141, 157, 205,
-    173, 189,
+    22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 10, 12, 11, 40, 43, 41, 39, 14, 46, 42, 13, 15, 45, 47,
+    44, 37, 34, 141, 157, 205, 173, 189,
 ];

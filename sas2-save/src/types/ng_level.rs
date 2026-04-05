@@ -2,7 +2,9 @@ use crate::types::flags::PlayerFlags;
 
 /// Update the `ng_level` field of `PlayerFlags` by scanning the flags.
 pub fn update_ng_level(flags: &mut PlayerFlags) {
-    flags.ng_level = flags.flags.iter()
+    flags.ng_level = flags
+        .flags
+        .iter()
         .filter_map(|f| f.strip_prefix("$&ng_").and_then(|s| s.parse::<i32>().ok()))
         .max()
         .unwrap_or(0);

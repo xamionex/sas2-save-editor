@@ -1,6 +1,9 @@
-mod config;
-mod catalog;
 mod app;
+mod atlas;
+mod catalog;
+mod config;
+mod export;
+mod tabs;
 
 use crate::app::SaveEditorApp;
 #[cfg(not(debug_assertions))]
@@ -10,12 +13,11 @@ fn main() -> eframe::Result<()> {
     #[cfg(not(debug_assertions))]
     hide_console();
 
-    // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|arg| arg == "--hide-lootdef-logging") {
+    if args.iter().any(|a| a == "--hide-lootdef-logging") {
         sas2_save::set_loot_logging_enabled(false);
     }
-    if args.iter().any(|arg| arg == "--hide-monster-logging") {
+    if args.iter().any(|a| a == "--hide-monster-logging") {
         sas2_save::set_monster_logging_enabled(false);
     }
 

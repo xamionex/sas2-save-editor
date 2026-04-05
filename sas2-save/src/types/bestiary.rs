@@ -1,5 +1,5 @@
-use crate::utils::SaveError;
 use crate::types::serializable::BinarySerializable;
+use crate::utils::SaveError;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{Read, Write};
 
@@ -20,7 +20,11 @@ impl BinarySerializable for BestiaryBeast {
         for d in &mut drops {
             *d = reader.read_u8()? != 0;
         }
-        Ok(BestiaryBeast { kills, deaths, drops })
+        Ok(BestiaryBeast {
+            kills,
+            deaths,
+            drops,
+        })
     }
 
     fn write<W: Write>(&self, writer: &mut W, _version: i32) -> Result<(), SaveError> {

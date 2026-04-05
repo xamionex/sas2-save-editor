@@ -1,7 +1,7 @@
+use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use directories::ProjectDirs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -34,11 +34,26 @@ pub struct AppConfig {
 
     #[serde(default)]
     pub account_for_level: bool,
+
+    #[serde(default)]
+    pub account_for_starstones: bool,
+
+    #[serde(default)]
+    pub equipment_panel_width: f32,
+
+    #[serde(default)]
+    pub skilltree_panel_width: f32,
 }
 
-pub fn default_item_icon_size() -> f32 { 52.0 }
-pub fn default_item_font_size() -> f32 { 12.0 }
-pub fn default_drag_sensitivity() -> f32 { 0.025 }
+pub fn default_item_icon_size() -> f32 {
+    52.0
+}
+pub fn default_item_font_size() -> f32 {
+    12.0
+}
+pub fn default_drag_sensitivity() -> f32 {
+    0.025
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -53,6 +68,9 @@ impl Default for AppConfig {
             add_gray_starstones: false,
             remove_gray_starstones: false,
             account_for_level: false,
+            account_for_starstones: false,
+            equipment_panel_width: 0.0,
+            skilltree_panel_width: 0.0,
         }
     }
 }

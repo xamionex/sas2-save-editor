@@ -12,15 +12,42 @@ impl AncestryCatalog {
         static ALL: OnceLock<Vec<Ancestry>> = OnceLock::new();
         ALL.get_or_init(|| {
             vec![
-                Ancestry { name: "Dusk".to_string(), path: "hero2".to_string() },
-                Ancestry { name: "Highlander".to_string(), path: "hero".to_string() },
-                Ancestry { name: "Mountain".to_string(), path: "hero6".to_string() },
-                Ancestry { name: "Oasis".to_string(), path: "hero7".to_string() },
-                Ancestry { name: "Sun".to_string(), path: "hero4".to_string() },
-                Ancestry { name: "Wood".to_string(), path: "hero3".to_string() },
-                Ancestry { name: "Valley".to_string(), path: "hero5".to_string() },
-                Ancestry { name: "Jinderen".to_string(), path: "hero8".to_string() },
-                Ancestry { name: "Gulchmire".to_string(), path: "hero9".to_string() },
+                Ancestry {
+                    name: "Dusk".to_string(),
+                    path: "hero2".to_string(),
+                },
+                Ancestry {
+                    name: "Highlander".to_string(),
+                    path: "hero".to_string(),
+                },
+                Ancestry {
+                    name: "Mountain".to_string(),
+                    path: "hero6".to_string(),
+                },
+                Ancestry {
+                    name: "Oasis".to_string(),
+                    path: "hero7".to_string(),
+                },
+                Ancestry {
+                    name: "Sun".to_string(),
+                    path: "hero4".to_string(),
+                },
+                Ancestry {
+                    name: "Wood".to_string(),
+                    path: "hero3".to_string(),
+                },
+                Ancestry {
+                    name: "Valley".to_string(),
+                    path: "hero5".to_string(),
+                },
+                Ancestry {
+                    name: "Jinderen".to_string(),
+                    path: "hero8".to_string(),
+                },
+                Ancestry {
+                    name: "Gulchmire".to_string(),
+                    path: "hero9".to_string(),
+                },
             ]
         })
     }

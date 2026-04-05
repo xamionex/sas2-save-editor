@@ -39,8 +39,8 @@ pub struct LootDef {
 pub struct LootCatalog {
     pub loot_defs: Vec<LootDef>,
     pub by_name: HashMap<String, usize>,
-    pub black_pearl_index: Option<usize>,
-    pub gray_pearl_index: Option<usize>,
+    pub black_starstone_index: Option<usize>,
+    pub gray_starstone_index: Option<usize>,
 }
 
 impl LootCatalog {
@@ -70,14 +70,16 @@ impl LootCatalog {
             defs.push(def);
         }
 
-        let black_pearl_index = defs.iter()
+        let black_pearl_index = defs
+            .iter()
             .position(|def| def.name == "black_pearl")
             .or_else(|| {
                 defs.iter()
                     .position(|def| def.title.iter().any(|t| t.contains("Black Starstone")))
             });
 
-        let gray_pearl_index = defs.iter()
+        let gray_pearl_index = defs
+            .iter()
             .position(|def| def.name == "gray_pearl")
             .or_else(|| {
                 defs.iter()
@@ -87,8 +89,8 @@ impl LootCatalog {
         Ok(LootCatalog {
             loot_defs: defs,
             by_name,
-            black_pearl_index,
-            gray_pearl_index,
+            black_starstone_index: black_pearl_index,
+            gray_starstone_index: gray_pearl_index,
         })
     }
 }
@@ -97,11 +99,7 @@ impl LootDef {
     fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, SaveError> {
         let name = read_string(reader)?;
         #[cfg(debug_assertions)]
-        crate::log_loot!(
-            "  name: \"{}\" at pos {}",
-            name,
-            reader.stream_position()?
-        );
+        crate::log_loot!("  name: \"{}\" at pos {}", name, reader.stream_position()?);
 
         let mut title = Vec::with_capacity(20);
         for _i in 0..20 {
@@ -131,11 +129,7 @@ impl LootDef {
 
         let type_ = reader.read_i32::<LittleEndian>()?;
         #[cfg(debug_assertions)]
-        crate::log_loot!(
-            "  type_: {} at pos {}",
-            type_,
-            reader.stream_position()?
-        );
+        crate::log_loot!("  type_: {} at pos {}", type_, reader.stream_position()?);
         let sub_type = reader.read_i32::<LittleEndian>()?;
         #[cfg(debug_assertions)]
         crate::log_loot!(
@@ -145,18 +139,10 @@ impl LootDef {
         );
         let cost = reader.read_f32::<LittleEndian>()?;
         #[cfg(debug_assertions)]
-        crate::log_loot!(
-            "  cost: {} at pos {}",
-            cost,
-            reader.stream_position()?
-        );
+        crate::log_loot!("  cost: {} at pos {}", cost, reader.stream_position()?);
         let img = reader.read_i32::<LittleEndian>()?;
         #[cfg(debug_assertions)]
-        crate::log_loot!(
-            "  img: {} at pos {}",
-            img,
-            reader.stream_position()?
-        );
+        crate::log_loot!("  img: {} at pos {}", img, reader.stream_position()?);
         let alt_img = reader.read_i32::<LittleEndian>()?;
         #[cfg(debug_assertions)]
         crate::log_loot!(

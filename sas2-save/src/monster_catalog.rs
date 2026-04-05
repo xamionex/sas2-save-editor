@@ -1,10 +1,10 @@
 use crate::utils::{read_string, SaveError};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::collections::HashMap;
-use std::io::{Read, Cursor};
+use std::fs;
 #[cfg(debug_assertions)]
 use std::io::Seek;
-use std::fs;
+use std::io::{Cursor, Read};
 use std::path::Path;
 
 #[derive(Debug, Clone)]
@@ -31,16 +31,25 @@ impl MonsterField {
             2 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 13 => {
                 MonsterFieldValue::Int(reader.read_i32::<LittleEndian>()?)
             }
-            _ => return Err(SaveError::InvalidData(format!("Unknown data_type {}", data_type))),
+            _ => {
+                return Err(SaveError::InvalidData(format!(
+                    "Unknown data_type {}",
+                    data_type
+                )));
+            }
         };
-        Ok(MonsterField { id, data_type, value })
+        Ok(MonsterField {
+            id,
+            data_type,
+            value,
+        })
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct MonsterDef {
     pub name: String,
-    pub titles: Vec<String>,      // exactly 20
+    pub titles: Vec<String>,       // exactly 20
     pub descriptions: Vec<String>, // exactly 20
     pub type_: i32,
     pub sub_type: i32,
@@ -144,12 +153,16 @@ impl MonsterCatalog {
             #[cfg(debug_assertions)]
             crate::log_monster!(
                 "  name: \"{}\", type: {}, sub_type: {}, img: {}",
-                def.name, def.type_, def.sub_type, def.img
+                def.name,
+                def.type_,
+                def.sub_type,
+                def.img
             );
             #[cfg(debug_assertions)]
             crate::log_monster!(
                 "  field_count: {}, flag_count: {}",
-                def.fields.len(), def.flags.len()
+                def.fields.len(),
+                def.flags.len()
             );
             #[cfg(debug_assertions)]
             crate::log_monster!(
@@ -157,7 +170,7 @@ impl MonsterCatalog {
                 idx,
                 reader.stream_position()?
             );
-            
+
             by_name.insert(def.name.clone(), idx);
             monsters.push(def);
         }

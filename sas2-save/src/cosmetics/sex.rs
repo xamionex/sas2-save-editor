@@ -12,8 +12,14 @@ impl SexCatalog {
         static ALL: OnceLock<Vec<Sex>> = OnceLock::new();
         ALL.get_or_init(|| {
             vec![
-                Sex { name: "Male".to_string(), path: "male".to_string() },
-                Sex { name: "Female".to_string(), path: "female".to_string() },
+                Sex {
+                    name: "Male".to_string(),
+                    path: "male".to_string(),
+                },
+                Sex {
+                    name: "Female".to_string(),
+                    path: "female".to_string(),
+                },
             ]
         })
     }
