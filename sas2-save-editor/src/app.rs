@@ -100,6 +100,9 @@ pub struct SaveEditorApp {
 
     // stats
     pub adjust_black_pearls_on_level_change: bool,
+    pub sync_black_starstones: bool,
+    pub add_gray_starstones: bool,
+    pub remove_gray_starstones: bool,
 }
 
 impl Default for SaveEditorApp {
@@ -144,6 +147,9 @@ impl Default for SaveEditorApp {
             hash_edit_string: String::new(),
             use_custom_hash: false,
             adjust_black_pearls_on_level_change: false,
+            sync_black_starstones: false,
+            add_gray_starstones: false,
+            remove_gray_starstones: false,
         };
 
         if let Some(game_path) = &app.config.game_path {
@@ -384,53 +390,6 @@ impl SaveEditorApp {
         }
     }
 
-    fn sync_black_pearls_with_level(&self, save: &mut SaveData, old_level: i32, new_level: i32) {
-        let delta = new_level - old_level;
-        if delta == 0 {
-            return;
-        }
-
-        let Some(catalog) = &self.catalog else { return };
-        let Some(idx) = catalog.black_pearl_index else {
-            #[cfg(debug_assertions)]
-            eprintln!("[ERROR] Black Starstone index missing in catalog, cannot sync");
-            return;
-        };
-
-        // Find existing Black Starstone (non-stockpiled)
-        let item_pos = save.equipment.inventory_items.iter_mut()
-            .find(|item| item.loot_idx == idx as i32 && !item.stock_piled);
-
-        if let Some(item) = item_pos {
-            let new_count = item.count + delta;
-            if new_count <= 0 {
-                save.equipment.inventory_items.retain(|i| !(i.loot_idx == idx as i32 && !i.stock_piled));
-                #[cfg(debug_assertions)]
-                eprintln!("[DEBUG] Removed Black Starstone stack (count became {})", new_count);
-            } else {
-                item.count = new_count;
-                #[cfg(debug_assertions)]
-                eprintln!("[DEBUG] Level {} -> {}, delta {}, new count {}", old_level, new_level, delta, new_count);
-            }
-        } else if delta > 0 {
-            save.equipment.inventory_items.push(Item {
-                loot_idx: idx as i32,
-                count: delta,
-                upgrade: 0,
-                stock_piled: false,
-                artifact_seed: -1,
-                item_version: 0,
-                rarity: 1,
-            });
-            #[cfg(debug_assertions)]
-            eprintln!("[DEBUG] Created new Black Starstone stack with count {}", delta);
-        } else {
-            // delta < 0 but no stack exists – cannot remove, ignore
-            #[cfg(debug_assertions)]
-            eprintln!("[DEBUG] Cannot remove {} Black Starstones: no stack present", -delta);
-        }
-    }
-
     pub fn show_stats_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
         if self.stats_dirty {
             if let Some(catalog) = &self.skilltree_catalog {
@@ -453,11 +412,14 @@ impl SaveEditorApp {
                 .range(1..=999999)).changed()
             {
                 if self.adjust_black_pearls_on_level_change {
-                    self.sync_black_pearls_with_level(save, old_level, save.stats.level);
+                    let delta = save.stats.level - old_level;
+                    if delta != 0 {
+                        Self::adjust_startstone(save, self.catalog.as_ref().and_then(|c| c.black_pearl_index), delta);
+                    }
                 }
                 self.stats_dirty = true;
             }
-            ui.checkbox(&mut self.adjust_black_pearls_on_level_change, "Give/Remove Black Starstones when changing");
+            ui.checkbox(&mut self.adjust_black_pearls_on_level_change, "Sync Black Starstones when changing");
         });
         self.add_ng_level_label(ui, save);
         ui.horizontal(|ui| {
@@ -1383,7 +1345,29 @@ impl SaveEditorApp {
         self.export_picker_open = true;
     }
 
+    fn adjust_startstone(save: &mut SaveData, stone_idx: Option<usize>, delta: i32) {
+        let Some(idx) = stone_idx else { return };
+        let items = &mut save.equipment.inventory_items;
+        if let Some(item) = items.iter_mut().find(|i| i.loot_idx == idx as i32) {
+            let new_count = item.count + delta;
+            item.count = new_count.max(0);
+        } else if delta > 0 {
+            items.push(Item {
+                loot_idx: idx as i32,
+                count: delta,
+                upgrade: 0,
+                stock_piled: false,
+                artifact_seed: -1,
+                item_version: 0,
+                rarity: 1,
+            });
+        }
+    }
+
     pub fn show_skilltree_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
+        let black_idx = self.catalog.as_ref().and_then(|c| c.black_pearl_index);
+        let gray_idx = self.catalog.as_ref().and_then(|c| c.gray_pearl_index);
+
         ui.heading("Skill Tree");
         ui.separator();
 
@@ -1428,6 +1412,14 @@ impl SaveEditorApp {
                 self.skilltree_zoom = 0.5;
                 self.skilltree_centered = false; // Force re-center on next frame
             }
+            ui.label(egui::RichText::new("Shift+Click=Quick +1").weak());
+            ui.label(egui::RichText::new("Right Click=Quick -1").weak());
+            ui.label(egui::RichText::new("Middle Click=Toggle Max").weak());
+        });
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.sync_black_starstones, "Sync Black Starstones");
+            ui.checkbox(&mut self.add_gray_starstones, "Add Gray Starstones");
+            ui.checkbox(&mut self.remove_gray_starstones, "Remove Gray Starstones");
         });
         ui.separator();
 
@@ -1583,8 +1575,64 @@ impl SaveEditorApp {
                 painter.image(texture.id(), rect, uv, tint);
 
                 let node_response = ui.interact(rect, egui::Id::new(node.id), egui::Sense::click());
-                if node_response.clicked() {
+
+                let single_click = node_response.clicked();
+                let middle_click = node_response.middle_clicked();
+                let modifiers = node_response.ctx.input(|i| i.modifiers);
+
+                // Add point
+                let current = save.stats.tree_unlocks[node.id];
+                let max_level = node.max_unlock();
+                if single_click && modifiers.shift {
+                    if current < max_level {
+                        save.stats.tree_unlocks[node.id] = current + 1;
+                        self.stats_dirty = true;
+                    }
+                    if self.sync_black_starstones {
+                        Self::adjust_startstone(save, black_idx, -1);
+                    }
+                    if self.add_gray_starstones {
+                        Self::adjust_startstone(save, gray_idx, 1);
+                    }
+                }
+                // Remove point
+                else if node_response.secondary_clicked() {
+                    if current > 0 {
+                        save.stats.tree_unlocks[node.id] = current - 1;
+                        self.stats_dirty = true;
+                    }
+                    if self.sync_black_starstones {
+                        Self::adjust_startstone(save, black_idx, 1);
+                    }
+                    if self.remove_gray_starstones {
+                        Self::adjust_startstone(save, gray_idx, -1);
+                    }
+                }
+                // Select on click
+                else if single_click && !modifiers.any() {
                     self.selected_skill_node = Some(node.id);
+                }
+                // Toggle max level on middle click
+                else if !single_click && middle_click {
+                    if current == max_level {
+                        if self.sync_black_starstones {
+                            Self::adjust_startstone(save, black_idx, -current_level);
+                        }
+                        if self.add_gray_starstones {
+                            Self::adjust_startstone(save, gray_idx, current_level);
+                        }
+                        save.stats.tree_unlocks[node.id] = 0;
+                        self.stats_dirty = true;
+                    } else {
+                        if self.sync_black_starstones {
+                            Self::adjust_startstone(save, black_idx, -max_level);
+                        }
+                        if self.remove_gray_starstones {
+                            Self::adjust_startstone(save, gray_idx, max_level);
+                        }
+                        save.stats.tree_unlocks[node.id] = max_level;
+                        self.stats_dirty = true;
+                    }
                 }
 
                 // Draw circles for multi-level nodes
