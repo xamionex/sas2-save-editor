@@ -8,6 +8,7 @@ pub struct Beard {
 pub struct BeardCatalog;
 
 impl BeardCatalog {
+    //noinspection SpellCheckingInspection
     pub fn get_all() -> &'static [Beard] {
         static ALL: OnceLock<Vec<Beard>> = OnceLock::new();
         ALL.get_or_init(|| {

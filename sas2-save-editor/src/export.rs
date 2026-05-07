@@ -223,7 +223,7 @@ pub fn show_export_progress(ui: &mut Ui, state: &ExportState) -> bool {
     should_close
 }
 
-/// Draw the file-picker window. Returns the list of files to export when the user clicks "Start Export", or `None` if still open / cancelled.
+/// Draw the file-picker window. Returns the list of files to export when the user clicks "Start Export", or `None` if still open / canceled.
 pub fn show_export_picker(
     ui: &mut Ui,
     root: &mut XnbNode,

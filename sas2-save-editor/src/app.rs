@@ -37,7 +37,7 @@ pub struct SaveEditorApp {
     pub skilltree_catalog: Option<SkillTreeCatalog>,
     pub skilltree_catalog_error: Option<String>,
 
-    // Globally loaded item icon atlas (items.xnb) — loaded lazily when the equipment tab is first opened.
+    // Globally loaded item icon atlas (items.xnb), loaded lazily when the equipment tab is first opened.
     pub item_atlas: Option<ItemAtlas>,
 
     // Skill tree rendering
@@ -258,7 +258,7 @@ impl SaveEditorApp {
                 let name = entry.file_name();
                 let name_str = name.to_string_lossy();
                 if name_str.starts_with(&pattern) && name_str.ends_with(".bak") {
-                    // Name is "<stem>.<n>.bak" — extract the <n> part
+                    // Name is "<stem>.<n>.bak", extract the <n> part
                     let middle = &name_str[pattern.len()..name_str.len() - 4];
                     if let Ok(idx) = middle.parse::<u32>() {
                         max_idx = max_idx.max(idx);

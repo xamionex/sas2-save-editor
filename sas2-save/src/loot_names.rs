@@ -14,6 +14,7 @@ pub fn get_type_name(type_: i32) -> &'static str {
     }
 }
 
+//noinspection SpellCheckingInspection
 /// Get the subtype name for a given loot type and subtype index.
 pub fn get_subtype_name(type_: i32, sub_type: i32) -> &'static str {
     match type_ {
