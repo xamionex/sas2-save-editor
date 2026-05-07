@@ -22,7 +22,7 @@ impl SaveEditorApp {
             }
 
             match node.node_type {
-                // Direct stat nodes (types 0–8 map 1:1 to the stat array)
+                // Direct stat nodes (types 0-8 map 1:1 to the stat array)
                 0..=8 => {
                     let stat_idx = node.node_type as usize;
                     if node.value > 1 {
@@ -111,7 +111,7 @@ impl SaveEditorApp {
                     let delta = save.stats.level - old_level;
                     if delta != 0 {
                         let black_idx = self.catalog.as_ref().and_then(|c| c.black_starstone_index);
-                        Self::adjust_startstone(save, black_idx, delta);
+                        Self::adjust_starstone(save, black_idx, delta);
                     }
                 }
                 self.stats_dirty = true;
@@ -228,7 +228,7 @@ impl SaveEditorApp {
 
     /// Add or subtract from a starstone stack in the inventory.
     /// Creates a new stack when adding and none exists yet.
-    pub fn adjust_startstone(save: &mut SaveData, stone_idx: Option<usize>, delta: i32) {
+    pub fn adjust_starstone(save: &mut SaveData, stone_idx: Option<usize>, delta: i32) {
         let Some(idx) = stone_idx else { return };
         let items = &mut save.equipment.inventory_items;
 

@@ -10,7 +10,7 @@ use std::io::{Cursor, Write};
 
 #[derive(Debug, Clone)]
 pub struct SaveData {
-    pub version: i32, // original version from file (>100 for saltguard)
+    pub version: i32, // original version from file (>100 for salt-guard)
     pub name: String,
     pub stats: Stats,
     pub equipment: Equipment,

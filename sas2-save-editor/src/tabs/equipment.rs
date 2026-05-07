@@ -6,12 +6,8 @@ use egui::{Response, ScrollArea, Ui};
 use sas2_save::loot_catalog::LootDef;
 use sas2_save::{loot_names, Item, SaveData};
 
-/// Draw one icon button from the atlas.  If either the atlas or the def is
-/// missing (or the def has no icon), an invisible placeholder of the same size
-/// is rendered so the grid columns stay aligned.
-///
-/// Free function rather than a method so callers can hold borrows into `self`
-/// (e.g. into the catalog) at the same time — a `&self` method would conflict.
+/// Draw one icon button from the atlas.
+/// If either the atlas or the def is missing (or the def has no icon), an invisible placeholder of the same size is rendered so the grid columns stay aligned.
 pub fn draw_image_button(
     ui: &mut Ui,
     atlas: Option<&ItemAtlas>,
@@ -33,8 +29,7 @@ pub fn draw_image_button(
 }
 
 /// Render a word-wrapped item name at `font_size` points.
-/// Each whitespace-separated word gets its own truncating label so long names
-/// don't overflow their icon column.
+/// Each whitespace-separated word gets its own truncating label so long names don't overflow their icon column.
 pub fn add_item_label(ui: &mut Ui, title: &str, font_size: f32) {
     for word in title.split_whitespace() {
         ui.add(
@@ -47,8 +42,7 @@ pub fn add_item_label(ui: &mut Ui, title: &str, font_size: f32) {
 }
 
 impl SaveEditorApp {
-    /// Full item detail panel: name, title, description, type/subtype, cost,
-    /// editable count/upgrade, and a collapsible raw-fields section.
+    /// Full item detail panel: name, title, description, type/subtype, cost, editable count/upgrade, and a collapsible raw-fields section.
     /// Used both in the inventory view and the catalog add-item preview.
     pub fn draw_item_details(&self, ui: &mut Ui, def: &LootDef, item: &mut Item) {
         ui.heading("Item Details");
@@ -142,6 +136,7 @@ impl SaveEditorApp {
     }
 
     fn show_inventory_or_stockpile(&mut self, ui: &mut Ui, save: &mut SaveData) {
+        // Synced search bar
         ui.horizontal(|ui| {
             ui.label("Search:");
             ui.text_edit_singleline(&mut self.item_search_filter);
@@ -184,8 +179,7 @@ impl SaveEditorApp {
                 .collect()
         };
 
-        // Extract Copy config values up front so the closures below don't need
-        // to borrow all of `self` while we also hold field-level borrows.
+        // Extract Copy config values up front so the closures below don't need to borrow all of `self` while we also hold field-level borrows.
         let icon_size = self.config.item_icon_size;
         let font_size = self.config.item_font_size;
         let mut selected_local = self.selected_equipment_item;
@@ -211,8 +205,7 @@ impl SaveEditorApp {
                     if orig_idx < items.len() {
                         let loot_idx = items[orig_idx].loot_idx;
 
-                        // Clone the def so the catalog borrow ends before draw_item_details,
-                        // which itself needs &self for drag sensitivity config.
+                        // Clone the def so the catalog borrow ends before draw_item_details, itself needs &self for drag sensitivity config.
                         let def = self
                             .catalog
                             .as_ref()
@@ -284,8 +277,7 @@ impl SaveEditorApp {
                             for &orig_idx in orig_indices {
                                 let loot_idx = save.equipment.inventory_items[orig_idx].loot_idx;
 
-                                // Scope the catalog and atlas borrows tightly so they
-                                // don't overlap with each other in the borrow checker.
+                                // Scope the catalog and atlas borrows tightly so they don't overlap with each other in the borrow checker.
                                 let (def_cloned, name) = {
                                     let def = self
                                         .catalog
@@ -337,7 +329,7 @@ impl SaveEditorApp {
             return;
         };
 
-        // Unified search bar (synced with inventory)
+        // Synced search bar
         ui.horizontal(|ui| {
             ui.label("Search:");
             ui.text_edit_singleline(&mut self.item_search_filter);

@@ -63,9 +63,9 @@ pub fn load_asset_from_xnb(path: &str) -> Result<XnbAsset, String> {
             load_effect_from_xnb(&data).map(XnbAsset::Effect)
         }
         "Microsoft.Xna.Framework.Content.SoundEffectReader" => {
-            load_soundeffect_from_xnb(&data).map(XnbAsset::SoundEffect)
+            load_sound_effect_from_xnb(&data).map(XnbAsset::SoundEffect)
         }
-        "BmFont.XmlSourceReader" => load_bmfont_from_xnb(&data).map(XnbAsset::BmFont),
+        "BmFont.XmlSourceReader" => load_bitmap_font_from_xnb(&data).map(XnbAsset::BmFont),
         _ => Ok(XnbAsset::Unknown(data)),
     }
 }
@@ -94,13 +94,13 @@ pub fn load_effect_from_xnb(data: &[u8]) -> Result<Effect, String> {
     parse_primary_from_buffer(data)
 }
 
-pub fn load_soundeffect_from_xnb(data: &[u8]) -> Result<SoundEffect, String> {
+pub fn load_sound_effect_from_xnb(data: &[u8]) -> Result<SoundEffect, String> {
     parse_primary_from_buffer(data)
 }
 
-pub fn load_bmfont_from_xnb(data: &[u8]) -> Result<String, String> {
-    let bmfont: BmFont = parse_primary_from_buffer(data)?;
-    Ok(bmfont.xml)
+pub fn load_bitmap_font_from_xnb(data: &[u8]) -> Result<String, String> {
+    let bitmap_font: BmFont = parse_primary_from_buffer(data)?;
+    Ok(bitmap_font.xml)
 }
 
 pub fn load_texture_from_path(path: &str) -> Result<RgbaImage, String> {

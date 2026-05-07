@@ -25,7 +25,7 @@ impl BinarySerializable for Item {
         let (artifact_seed, item_version, rarity) = if version >= 20 {
             let artifact_seed = reader.read_i32::<LittleEndian>()?;
             let item_version = reader.read_i32::<LittleEndian>()?;
-            // Rarity only present if saltguard
+            // Rarity only present if salt-guard
             let rarity = reader.read_i32::<LittleEndian>()?;
             (artifact_seed, item_version, rarity)
         } else {

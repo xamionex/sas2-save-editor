@@ -8,6 +8,7 @@ pub struct Hair {
 pub struct HairCatalog;
 
 impl HairCatalog {
+    //noinspection SpellCheckingInspection
     pub fn get_all() -> &'static [Hair] {
         static ALL: OnceLock<Vec<Hair>> = OnceLock::new();
         ALL.get_or_init(|| {

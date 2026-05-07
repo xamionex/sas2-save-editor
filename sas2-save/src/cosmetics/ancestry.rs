@@ -8,6 +8,7 @@ pub struct Ancestry {
 pub struct AncestryCatalog;
 
 impl AncestryCatalog {
+    //noinspection SpellCheckingInspection
     pub fn get_all() -> &'static [Ancestry] {
         static ALL: OnceLock<Vec<Ancestry>> = OnceLock::new();
         ALL.get_or_init(|| {

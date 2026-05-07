@@ -346,11 +346,11 @@ impl SaveEditorApp {
                             || save.stats.class_unlocks.contains(&(parent_id));
 
                         let line_color = if node_unlocked && parent_unlocked {
-                            egui::Color32::from_rgb(255, 215, 0) // both unlocked — gold
+                            egui::Color32::from_rgb(255, 215, 0) // both unlocked, gold
                         } else if node_unlocked || parent_unlocked {
-                            egui::Color32::from_rgb(100, 100, 200) // one side — blue-ish
+                            egui::Color32::from_rgb(100, 100, 200) // one side, blue-ish
                         } else {
-                            egui::Color32::from_gray(80) // neither — dark grey
+                            egui::Color32::from_gray(80) // neither, dark gray
                         };
 
                         painter.line_segment([start, end], (2.0 * self.skilltree_zoom, line_color));
@@ -471,10 +471,10 @@ impl SaveEditorApp {
                         self.stats_dirty = true;
 
                         if self.config.sync_black_starstones {
-                            Self::adjust_startstone(save, black_idx, -node.cost);
+                            Self::adjust_starstone(save, black_idx, -node.cost);
                         }
                         if self.config.add_gray_starstones {
-                            Self::adjust_startstone(save, gray_idx, node.cost);
+                            Self::adjust_starstone(save, gray_idx, node.cost);
                         }
                     }
                 }
@@ -485,10 +485,10 @@ impl SaveEditorApp {
                         self.stats_dirty = true;
 
                         if self.config.sync_black_starstones {
-                            Self::adjust_startstone(save, black_idx, node.cost);
+                            Self::adjust_starstone(save, black_idx, node.cost);
                         }
                         if self.config.remove_gray_starstones {
-                            Self::adjust_startstone(save, gray_idx, -node.cost);
+                            Self::adjust_starstone(save, gray_idx, -node.cost);
                         }
                     }
                 }
@@ -498,10 +498,10 @@ impl SaveEditorApp {
                         // Downgrade to 0: refund all spent stones
                         let total_cost = current_level * node.cost;
                         if self.config.sync_black_starstones {
-                            Self::adjust_startstone(save, black_idx, total_cost);
+                            Self::adjust_starstone(save, black_idx, total_cost);
                         }
                         if self.config.remove_gray_starstones {
-                            Self::adjust_startstone(save, gray_idx, -total_cost);
+                            Self::adjust_starstone(save, gray_idx, -total_cost);
                         }
                         save.stats.tree_unlocks[node.id] = 0;
                         self.stats_dirty = true;
@@ -525,10 +525,10 @@ impl SaveEditorApp {
                             self.stats_dirty = true;
 
                             if self.config.sync_black_starstones {
-                                Self::adjust_startstone(save, black_idx, -total_cost);
+                                Self::adjust_starstone(save, black_idx, -total_cost);
                             }
                             if self.config.add_gray_starstones {
-                                Self::adjust_startstone(save, gray_idx, total_cost);
+                                Self::adjust_starstone(save, gray_idx, total_cost);
                             }
                         }
                     }

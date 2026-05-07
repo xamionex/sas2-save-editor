@@ -109,7 +109,7 @@ impl SaveEditorApp {
         ui.label("Warning: Mod only item data will be lost. (artifact seed, rarity, etc.)");
         ui.label("The resulting save should be compatible with the vanilla game.");
         ui.label("Note: Everything will be unequipped as to not cause missing index errors.");
-        ui.label("This was only tested with Saltguard. Make backups.");
+        ui.label("This was only tested with Salt-guard. Make backups.");
 
         if ui.button("Convert and Save As...").clicked() {
             self.convert_to_vanilla(save, self.conversion_target_version);
