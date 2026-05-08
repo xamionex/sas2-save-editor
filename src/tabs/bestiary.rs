@@ -1,9 +1,9 @@
-use crate::app::SaveEditorApp;
+use crate::app::SaveEditor;
 use eframe::egui;
 use egui::{ScrollArea, Ui};
 use sas2_save::{BestiaryBeast, SaveData};
 
-impl SaveEditorApp {
+impl SaveEditor {
     fn add_bestiary_details(&self, ui: &mut Ui, beast: &mut BestiaryBeast) {
         ui.horizontal(|ui| {
             ui.label("Kills:");

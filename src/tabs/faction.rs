@@ -1,11 +1,11 @@
-use crate::app::SaveEditorApp;
+use crate::app::SaveEditor;
 use eframe::egui;
 use egui::Ui;
 use sas2_save::types::faction::PlayerFaction;
 use sas2_save::types::ng_level;
 use sas2_save::SaveData;
 
-impl SaveEditorApp {
+impl SaveEditor {
     pub fn show_faction_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
         let current_faction = PlayerFaction::from_flags(&save.flags.flags);
         let mut selected = current_faction;

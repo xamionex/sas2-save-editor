@@ -1,11 +1,11 @@
-use crate::app::SaveEditorApp;
+use crate::app::SaveEditor;
 use eframe::egui;
 use egui::Ui;
 use rfd::FileDialog;
 use sas2_save::SaveData;
 use std::fs;
 
-impl SaveEditorApp {
+impl SaveEditor {
     /// Sanitizes a modded save for vanilla compatibility:
     /// - Drops items whose loot_idx is outside the vanilla catalog
     /// - Clamps upgrade values to the vanilla maximum of 10

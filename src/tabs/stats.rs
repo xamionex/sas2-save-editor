@@ -1,11 +1,11 @@
-use crate::app::SaveEditorApp;
+use crate::app::SaveEditor;
 use eframe::egui;
 use egui::{Grid, Ui};
 use sas2_save::skilltree::SkillTreeCatalog;
 use sas2_save::types::ng_level;
 use sas2_save::{Item, SaveData};
 
-impl SaveEditorApp {
+impl SaveEditor {
     /// Recalculates the nine primary stats from the skill tree unlocks.
     /// This mirrors the game's `PlayerStats.UpdateStats()` for all node types.
     pub fn recalc_player_stats(save: &mut SaveData, catalog: &SkillTreeCatalog) {
@@ -86,7 +86,7 @@ impl SaveEditorApp {
         // Recalculate whenever the skill tree changes (stats_dirty is set there)
         if self.stats_dirty {
             if let Some(catalog) = &self.skilltree_catalog {
-                SaveEditorApp::recalc_player_stats(save, catalog);
+                SaveEditor::recalc_player_stats(save, catalog);
             }
             self.stats_dirty = false;
         }

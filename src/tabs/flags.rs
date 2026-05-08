@@ -1,10 +1,10 @@
-use crate::app::SaveEditorApp;
+use crate::app::SaveEditor;
 use eframe::egui;
 use egui::{ScrollArea, Ui};
 use sas2_save::types::ng_level;
 use sas2_save::SaveData;
 
-impl SaveEditorApp {
+impl SaveEditor {
     pub fn show_flags_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
         ui.label("Flags:");
 

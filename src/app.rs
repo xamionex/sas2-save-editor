@@ -3,7 +3,7 @@ use crate::catalog::{
     load_loot_catalog, load_monster_catalog, load_skilltree_catalog, load_skilltree_texture,
 };
 use crate::config::{
-    default_drag_sensitivity, default_item_font_size, default_item_icon_size, AppConfig,
+    default_drag_sensitivity, default_item_font_size, default_item_icon_size, SaveEditorConfig,
 };
 use crate::export::{
     build_xnb_tree, show_export_picker, show_export_progress, start_export_job, ExportState,
@@ -20,14 +20,14 @@ use sas2_save::SaveData;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub struct SaveEditorApp {
+pub struct SaveEditor {
     pub load_requested: bool,
     pub save_data: Option<SaveData>,
     pub file_path: Option<PathBuf>,
     pub error_message: Option<String>,
     pub active_tab: Tab,
 
-    pub config: AppConfig,
+    pub config: SaveEditorConfig,
 
     // Loot / monster / skill catalogs and their respective load errors
     pub catalog: Option<LootCatalog>,
@@ -81,9 +81,9 @@ pub struct SaveEditorApp {
     pub prev_canvas_rect: Option<Rect>,
 }
 
-impl Default for SaveEditorApp {
+impl Default for SaveEditor {
     fn default() -> Self {
-        let config = AppConfig::load();
+        let config = SaveEditorConfig::load();
 
         let mut app = Self {
             load_requested: false,
@@ -144,7 +144,7 @@ impl Default for SaveEditorApp {
     }
 }
 
-impl SaveEditorApp {
+impl SaveEditor {
     /// Load (or reload) all three catalogs from `game_path`.
     fn load_catalogs(&mut self, game_path: &Path) {
         match load_loot_catalog(game_path) {
@@ -219,7 +219,7 @@ impl SaveEditorApp {
 
     pub fn save_file(&mut self) {
         if let (Some(save), Some(path)) = (self.save_data.as_mut(), &self.file_path) {
-            SaveEditorApp::create_backup(path);
+            SaveEditor::create_backup(path);
             if self.use_custom_hash {
                 save.custom_hash_override = save.hash_data;
             } else {
@@ -388,7 +388,7 @@ impl SaveEditorApp {
     }
 }
 
-impl eframe::App for SaveEditorApp {
+impl eframe::App for SaveEditor {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut Frame) {
         if self.config_save_timer > 0.0 {
             self.config_save_timer -= ui.ctx().input(|i| i.stable_dt);

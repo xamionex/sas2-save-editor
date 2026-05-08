@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppConfig {
+pub struct SaveEditorConfig {
     #[serde(default)]
     pub game_path: Option<PathBuf>,
 
@@ -55,7 +55,7 @@ pub fn default_drag_sensitivity() -> f32 {
     0.025
 }
 
-impl Default for AppConfig {
+impl Default for SaveEditorConfig {
     fn default() -> Self {
         Self {
             game_path: None,
@@ -75,7 +75,7 @@ impl Default for AppConfig {
     }
 }
 
-impl AppConfig {
+impl SaveEditorConfig {
     pub fn load() -> Self {
         if let Some(proj_dirs) = ProjectDirs::from("com", "amione", "SaS2SaveEditor") {
             let config_file = proj_dirs.config_dir().join("config.json");

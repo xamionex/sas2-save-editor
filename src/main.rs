@@ -5,7 +5,7 @@ mod config;
 mod export;
 mod tabs;
 
-use crate::app::SaveEditorApp;
+use crate::app::SaveEditor;
 #[cfg(not(debug_assertions))]
 use hide_console::hide_console;
 
@@ -47,6 +47,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "SaS2 Save Editor",
         options,
-        Box::new(|_cc| Ok(Box::new(SaveEditorApp::default()))),
+        Box::new(|_cc| Ok(Box::new(SaveEditor::default()))),
     )
 }

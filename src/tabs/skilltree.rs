@@ -1,10 +1,10 @@
-use crate::app::SaveEditorApp;
+use crate::app::SaveEditor;
 use eframe::egui;
 use egui::{pos2, Rect, Stroke, Ui};
 use sas2_save::skilltree::{SkillTreeCatalog, SKILL_IMG};
 use sas2_save::SaveData;
 
-impl SaveEditorApp {
+impl SaveEditor {
     /// Sum of (node.cost * unlock_level) across the entire tree.
     /// Used to check whether the player has spent more points than their level allows.
     pub fn calculate_total_spent_starstones(save: &SaveData, catalog: &SkillTreeCatalog) -> i32 {
@@ -196,7 +196,7 @@ impl SaveEditorApp {
                                 .changed()
                             {
                                 save.stats.tree_unlocks[node.id] = val;
-                                SaveEditorApp::recalc_player_stats(save, catalog);
+                                SaveEditor::recalc_player_stats(save, catalog);
                             }
                         });
 
@@ -221,7 +221,7 @@ impl SaveEditorApp {
                                     save.stats.class_unlocks[slot] = node.id as i32;
                                     // Slot 3 doesn't trigger recalc in the original code, kept as-is
                                     if slot < 2 {
-                                        SaveEditorApp::recalc_player_stats(save, catalog);
+                                        SaveEditor::recalc_player_stats(save, catalog);
                                     }
                                 }
                             });

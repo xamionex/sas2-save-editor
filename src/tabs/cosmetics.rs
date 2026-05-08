@@ -1,4 +1,4 @@
-use crate::app::SaveEditorApp;
+use crate::app::SaveEditor;
 use eframe::egui;
 use egui::Ui;
 use sas2_save::cosmetics::{
@@ -7,7 +7,7 @@ use sas2_save::cosmetics::{
 };
 use sas2_save::SaveData;
 
-impl SaveEditorApp {
+impl SaveEditor {
     pub fn show_cosmetics_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
         type NameFn = fn(usize) -> Option<&'static str>;
 

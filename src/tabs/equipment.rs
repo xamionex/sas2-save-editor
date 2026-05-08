@@ -1,4 +1,4 @@
-use crate::app::SaveEditorApp;
+use crate::app::SaveEditor;
 use crate::atlas::ItemAtlas;
 use crate::tabs::EquipmentSubTab;
 use eframe::egui;
@@ -41,7 +41,7 @@ pub fn add_item_label(ui: &mut Ui, title: &str, font_size: f32) {
     }
 }
 
-impl SaveEditorApp {
+impl SaveEditor {
     /// Full item detail panel: name, title, description, type/subtype, cost, editable count/upgrade, and a collapsible raw-fields section.
     /// Used both in the inventory view and the catalog add-item preview.
     pub fn draw_item_details(&self, ui: &mut Ui, def: &LootDef, item: &mut Item) {
