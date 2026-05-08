@@ -135,7 +135,7 @@ pub fn start_export_job(game_path: PathBuf, files: Vec<PathBuf>, overwrite: bool
     };
 
     std::thread::spawn(move || {
-        let export_root = PathBuf::from("exports");
+        let export_root = PathBuf::from("../exports");
         let _ = fs::create_dir_all(&export_root);
 
         for path in files {
