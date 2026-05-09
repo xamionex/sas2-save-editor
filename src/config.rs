@@ -43,11 +43,12 @@ pub struct SaveEditorConfig {
 
     #[serde(default)]
     pub skilltree_panel_width: f32,
+
+    #[serde(default)]
+    pub bestiary_panel_width: f32,
 }
 
-pub fn default_item_icon_size() -> f32 {
-    52.0
-}
+pub fn default_item_icon_size() -> f32 { 52.0 }
 pub fn default_item_font_size() -> f32 {
     12.0
 }
@@ -71,6 +72,7 @@ impl Default for SaveEditorConfig {
             account_for_starstones: false,
             equipment_panel_width: 0.0,
             skilltree_panel_width: 0.0,
+            bestiary_panel_width: 0.0,
         }
     }
 }

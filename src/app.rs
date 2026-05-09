@@ -1,4 +1,4 @@
-use crate::atlas::ItemAtlas;
+use crate::atlas::{ItemAtlas, MonsterTextureCache};
 use crate::catalog::{
     load_loot_catalog, load_monster_catalog, load_skilltree_catalog, load_skilltree_texture,
 };
@@ -34,6 +34,9 @@ pub struct SaveEditor {
     pub catalog_error: Option<String>,
     pub monster_catalog: Option<MonsterCatalog>,
     pub monster_catalog_error: Option<String>,
+    pub monster_texture_cache: MonsterTextureCache,
+    pub bestiary_search_filter: String,
+    pub selected_bestiary_beast: Option<usize>,
     pub skilltree_catalog: Option<SkillTreeCatalog>,
     pub skilltree_catalog_error: Option<String>,
 
@@ -68,7 +71,7 @@ pub struct SaveEditor {
     // Settings window
     pub settings_open: bool,
 
-    // Modded → vanilla conversion
+    // Modded -> vanilla conversion
     pub conversion_target_version: i32,
     pub conversion_just_happened: bool,
 
@@ -97,6 +100,9 @@ impl Default for SaveEditor {
             catalog_error: None,
             monster_catalog: None,
             monster_catalog_error: None,
+            monster_texture_cache: MonsterTextureCache::new(),
+            bestiary_search_filter: String::new(),
+            selected_bestiary_beast: None,
             skilltree_catalog: None,
             skilltree_catalog_error: None,
 
@@ -159,8 +165,15 @@ impl SaveEditor {
         }
         match load_monster_catalog(game_path) {
             Ok(cat) => {
-                self.monster_catalog = Some(cat);
+                self.monster_catalog = Some(cat.clone());
                 self.monster_catalog_error = None;
+
+                // start background texture loading
+                let names: Vec<String> = cat.monsters.iter()
+                    .filter(|m| !m.texture.is_empty())
+                    .map(|m| m.texture.clone())
+                    .collect();
+                self.monster_texture_cache.start_preload(game_path, names);
             }
             Err(e) => {
                 self.monster_catalog = None;
@@ -389,6 +402,16 @@ impl SaveEditor {
 }
 
 impl eframe::App for SaveEditor {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Process monster texture loading
+        //if self.active_tab == Tab::Bestiary {
+        self.monster_texture_cache.update(ctx);
+        if self.monster_texture_cache.is_loading() {
+            ctx.request_repaint();
+        }
+        //}
+    }
+
     fn ui(&mut self, ui: &mut Ui, _frame: &mut Frame) {
         if self.config_save_timer > 0.0 {
             self.config_save_timer -= ui.ctx().input(|i| i.stable_dt);
@@ -490,11 +513,16 @@ impl eframe::App for SaveEditor {
                             ui.selectable_value(&mut self.active_tab, Tab::Flags, "Flags");
                             ui.selectable_value(&mut self.active_tab, Tab::Bestiary, "Bestiary");
                             ui.selectable_value(&mut self.active_tab, Tab::Faction, "Faction");
-                            ui.selectable_value(
-                                &mut self.active_tab,
-                                Tab::ConvertSave,
-                                "Convert modded to vanilla save",
-                            );
+                            ui.selectable_value(&mut self.active_tab, Tab::ConvertSave, "Convert modded to vanilla save");
+
+                            ui.vertical(|ui| {
+                                // progress bar while textures are loading
+                                if let Some((loaded, total)) = self.monster_texture_cache.progress() {
+                                    let fraction = loaded as f32 / total as f32;
+                                    ui.add(egui::ProgressBar::new(fraction.min(1.0)).show_percentage());
+                                    ui.label(format!("{}/{} textures loaded…", loaded, total));
+                                }
+                            });
                         });
                     });
 
