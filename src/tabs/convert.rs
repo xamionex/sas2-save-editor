@@ -2,7 +2,7 @@ use crate::app::SaveEditor;
 use eframe::egui;
 use egui::Ui;
 use rfd::FileDialog;
-use sas2_save::SaveData;
+use sas2_parser::SaveData;
 use std::fs;
 
 impl SaveEditor {

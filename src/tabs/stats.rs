@@ -1,9 +1,9 @@
 use crate::app::SaveEditor;
 use eframe::egui;
 use egui::{Grid, Ui};
-use sas2_save::skilltree::SkillTreeCatalog;
-use sas2_save::types::ng_level;
-use sas2_save::{Item, SaveData};
+use sas2_parser::skilltree::SkillTreeCatalog;
+use sas2_parser::types::ng_level;
+use sas2_parser::{Item, SaveData};
 
 impl SaveEditor {
     /// Recalculates the nine primary stats from the skill tree unlocks.

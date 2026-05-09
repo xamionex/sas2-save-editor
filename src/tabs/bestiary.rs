@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use crate::app::SaveEditor;
 use eframe::egui;
 use egui::Ui;
-use sas2_save::{BestiaryBeast, SaveData};
+use sas2_parser::{BestiaryBeast, SaveData};
 
 impl SaveEditor {
     pub fn show_bestiary_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {

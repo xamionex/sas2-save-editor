@@ -1,9 +1,9 @@
 use crate::app::SaveEditor;
 use eframe::egui;
 use egui::Ui;
-use sas2_save::types::faction::PlayerFaction;
-use sas2_save::types::ng_level;
-use sas2_save::SaveData;
+use sas2_parser::types::faction::PlayerFaction;
+use sas2_parser::types::ng_level;
+use sas2_parser::SaveData;
 
 impl SaveEditor {
     pub fn show_faction_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {

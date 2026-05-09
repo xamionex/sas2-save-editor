@@ -1,11 +1,11 @@
 use crate::app::SaveEditor;
 use eframe::egui;
 use egui::Ui;
-use sas2_save::cosmetics::{
+use sas2_parser::cosmetics::{
     AncestryCatalog, BeardCatalog, ClassCatalog, ColorCatalog, CrimeCatalog, EyeCatalog,
     HairCatalog, SexCatalog,
 };
-use sas2_save::SaveData;
+use sas2_parser::SaveData;
 
 impl SaveEditor {
     pub fn show_cosmetics_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {

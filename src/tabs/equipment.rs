@@ -3,8 +3,8 @@ use crate::atlas::ItemAtlas;
 use crate::tabs::EquipmentSubTab;
 use eframe::egui;
 use egui::{Response, ScrollArea, Ui};
-use sas2_save::loot_catalog::LootDef;
-use sas2_save::{loot_names, Item, SaveData};
+use sas2_parser::loot_catalog::LootDef;
+use sas2_parser::{loot_names, Item, SaveData};
 
 /// Draw one icon button from the atlas.
 /// If either the atlas or the def is missing (or the def has no icon), an invisible placeholder of the same size is rendered so the grid columns stay aligned.
@@ -91,10 +91,10 @@ impl SaveEditor {
                 for field in &def.fields {
                     let name = loot_names::get_field_name(def.type_, field.id);
                     let value = match &field.value {
-                        sas2_save::loot_catalog::LootFieldValue::Float(v) => format!("{:.2}", v),
-                        sas2_save::loot_catalog::LootFieldValue::Int(v) => v.to_string(),
-                        sas2_save::loot_catalog::LootFieldValue::Bool(v) => v.to_string(),
-                        sas2_save::loot_catalog::LootFieldValue::String(v) => v.clone(),
+                        sas2_parser::loot_catalog::LootFieldValue::Float(v) => format!("{:.2}", v),
+                        sas2_parser::loot_catalog::LootFieldValue::Int(v) => v.to_string(),
+                        sas2_parser::loot_catalog::LootFieldValue::Bool(v) => v.to_string(),
+                        sas2_parser::loot_catalog::LootFieldValue::String(v) => v.clone(),
                     };
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(name).weak().size(12.0));

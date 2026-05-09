@@ -120,7 +120,7 @@ fn propagate_selection(node: &mut XnbNode, val: bool) {
 
 /// Spawn a background thread that exports the given XNB files to an `exports/` folder, preserving the directory structure relative to `game_path`.
 pub fn start_export_job(game_path: PathBuf, files: Vec<PathBuf>, overwrite: bool) -> ExportState {
-    use sas2_save::xnb_loader::{asset_extension, export_asset_to_file, load_asset_from_xnb};
+    use sas2_parser::xnb_loader::{asset_extension, export_asset_to_file, load_asset_from_xnb};
 
     let cancel = Arc::new(AtomicBool::new(false));
     let progress = Arc::new(AtomicUsize::new(0));

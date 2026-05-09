@@ -1,6 +1,6 @@
-use sas2_save::loot_catalog::LootCatalog;
-use sas2_save::monster_catalog::MonsterCatalog;
-use sas2_save::skilltree::SkillTreeCatalog;
+use sas2_parser::loot_catalog::LootCatalog;
+use sas2_parser::monster_catalog::MonsterCatalog;
+use sas2_parser::skilltree::SkillTreeCatalog;
 use std::fs;
 use std::path::Path;
 
@@ -46,7 +46,7 @@ pub fn load_skilltree_texture(
     // Skill icons are on the main UI atlas
     let interface_xnb = game_path.join("Content").join("gfx").join("interface.xnb");
     if interface_xnb.exists() {
-        let img = sas2_save::xnb_loader::load_texture_from_path(interface_xnb.to_str().unwrap())?;
+        let img = sas2_parser::xnb_loader::load_texture_from_path(interface_xnb.to_str().unwrap())?;
         let width = img.width();
         let height = img.height();
         let pixels = img.into_vec();

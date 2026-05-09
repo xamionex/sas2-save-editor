@@ -13,10 +13,10 @@ use crate::tabs::{EquipmentSubTab, Tab};
 use eframe::{egui, Frame};
 use egui::{Rect, TextureHandle, Ui};
 use rfd::FileDialog;
-use sas2_save::loot_catalog::LootCatalog;
-use sas2_save::monster_catalog::MonsterCatalog;
-use sas2_save::skilltree::SkillTreeCatalog;
-use sas2_save::SaveData;
+use sas2_parser::loot_catalog::LootCatalog;
+use sas2_parser::monster_catalog::MonsterCatalog;
+use sas2_parser::skilltree::SkillTreeCatalog;
+use sas2_parser::SaveData;
 use std::fs;
 use std::path::{Path, PathBuf};
 
