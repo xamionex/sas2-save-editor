@@ -47,9 +47,13 @@ impl SaveEditor {
 
                         if let Some(catalog) = &self.monster_catalog {
                             if let Some(def) = catalog.monsters.get(idx) {
-                                if let Some(tex) = self.monster_texture_cache.get_or_load(&def.texture) {
+                                if let Some(tex) = self.monster_texture_cache.get_or_assemble(
+                                    ui.ctx(),
+                                    &def.def,
+                                    &def.texture,
+                                ) {
                                     ui.add(
-                                        egui::Image::from_texture(&tex.clone())
+                                        egui::Image::from_texture(&tex)
                                             .fit_to_exact_size(egui::vec2(96.0, 96.0)),
                                     );
                                 } else {
@@ -108,7 +112,11 @@ impl SaveEditor {
                 })
                 .map(|(idx, _beast)| {
                     let tex = catalog.monsters.get(idx)
-                        .and_then(|def| self.monster_texture_cache.get_or_load(&def.texture));
+                        .and_then(|def| self.monster_texture_cache.get_or_assemble(
+                            ui.ctx(),
+                            &def.def,
+                            &def.texture,
+                        ));
                     let name = catalog.monsters.get(idx)
                         .map(|m| m.titles[0].as_str())
                         .unwrap_or("");

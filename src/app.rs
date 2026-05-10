@@ -173,6 +173,7 @@ impl SaveEditor {
                     .filter(|m| !m.texture.is_empty())
                     .map(|m| m.texture.clone())
                     .collect();
+                self.monster_texture_cache.set_game_path(game_path);
                 self.monster_texture_cache.start_preload(game_path, names);
             }
             Err(e) => {
@@ -332,11 +333,11 @@ impl SaveEditor {
                             )
                             .changed()
                         {
-                            self.config.save();
+                            self.config_save_timer = 0.1;
                         }
                         if ui.button("Reset").clicked() {
                             self.config.item_icon_size = default_item_icon_size();
-                            self.config.save();
+                            self.config_save_timer = 0.1;
                         }
                     });
 
@@ -351,11 +352,11 @@ impl SaveEditor {
                             )
                             .changed()
                         {
-                            self.config.save();
+                            self.config_save_timer = 0.1;
                         }
                         if ui.button("Reset").clicked() {
                             self.config.item_font_size = default_item_font_size();
-                            self.config.save();
+                            self.config_save_timer = 0.1;
                         }
                     });
 
@@ -372,11 +373,11 @@ impl SaveEditor {
                             )
                             .changed()
                         {
-                            self.config.save();
+                            self.config_save_timer = 0.1;
                         }
                         if ui.button("Reset").clicked() {
                             self.config.drag_value_sensitivity = default_drag_sensitivity();
-                            self.config.save();
+                            self.config_save_timer = 0.1;
                         }
                     });
 
@@ -391,7 +392,7 @@ impl SaveEditor {
                             )
                             .changed()
                         {
-                            self.config.save();
+                            self.config_save_timer = 0.1;
                         }
                     });
                 });
@@ -402,27 +403,7 @@ impl SaveEditor {
 }
 
 impl eframe::App for SaveEditor {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Process monster texture loading
-        //if self.active_tab == Tab::Bestiary {
-        self.monster_texture_cache.update(ctx);
-        if self.monster_texture_cache.is_loading() {
-            ctx.request_repaint();
-        }
-        //}
-    }
-
     fn ui(&mut self, ui: &mut Ui, _frame: &mut Frame) {
-        if self.config_save_timer > 0.0 {
-            self.config_save_timer -= ui.ctx().input(|i| i.stable_dt);
-
-            if self.config_save_timer <= 0.01 {
-                self.config.save();
-                eprintln!("Config saved.");
-                self.config_save_timer = 0.0;
-            }
-        }
-
         if self.skilltree_texture.is_none() && self.skilltree_catalog.is_some() {
             if let Some(game_path) = &self.config.game_path {
                 match load_skilltree_texture(game_path, ui.ctx()) {
@@ -476,10 +457,7 @@ impl eframe::App for SaveEditor {
             if let Some(game_path) = &self.config.game_path {
                 ui.label(format!("Game folder: {}", game_path.display()));
             } else {
-                ui.colored_label(
-                    egui::Color32::YELLOW,
-                    "Game folder not set (needed for item names, icons, and bestiary names)",
-                );
+                ui.colored_label(egui::Color32::YELLOW, "Game folder not set (needed for item names/icons, and bestiary textures/names)", );
                 if ui.button("Set Game Folder").clicked() {
                     self.choose_game_folder();
                 }
@@ -488,11 +466,9 @@ impl eframe::App for SaveEditor {
                 ui.colored_label(egui::Color32::RED, format!("Loot catalog error: {}", err));
             }
             if let Some(err) = &self.monster_catalog_error {
-                ui.colored_label(
-                    egui::Color32::RED,
-                    format!("Monster catalog error: {}", err),
-                );
+                ui.colored_label(egui::Color32::RED, format!("Monster catalog error: {}", err));
             }
+            if let Some(err) = &self.error_message { ui.colored_label(egui::Color32::RED, err); }
 
             ui.separator();
 
@@ -589,5 +565,25 @@ impl eframe::App for SaveEditor {
                 }
             }
         });
+    }
+
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
+        // Process monster texture loading
+        //if self.active_tab == Tab::Bestiary {
+        self.monster_texture_cache.update(ctx);
+        if self.monster_texture_cache.is_loading() {
+            ctx.request_repaint();
+        }
+
+        if self.config_save_timer > 0.0 {
+            self.config_save_timer -= ctx.input(|i| i.stable_dt);
+
+            if self.config_save_timer <= 0.01 {
+                self.config.save();
+                eprintln!("Config saved.");
+                self.config_save_timer = 0.0;
+            }
+        }
+        //}
     }
 }
