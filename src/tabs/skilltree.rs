@@ -62,7 +62,7 @@ impl SaveEditor {
                 )
                 .changed()
             {
-                self.config.save();
+                self.config_save_timer = 0.1;
             }
             if ui
                 .checkbox(
@@ -71,7 +71,7 @@ impl SaveEditor {
                 )
                 .changed()
             {
-                self.config.save();
+                self.config_save_timer = 0.1;
             }
             if ui
                 .checkbox(
@@ -80,7 +80,7 @@ impl SaveEditor {
                 )
                 .changed()
             {
-                self.config.save();
+                self.config_save_timer = 0.1;
             }
         });
 
