@@ -3,8 +3,8 @@ use egui::{ScrollArea, Ui};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 /// A node in the XNB file picker tree (directory or leaf file).
@@ -37,7 +37,7 @@ pub fn build_xnb_tree(path: &Path) -> Option<XnbNode> {
         children: Vec::new(),
         selected: true,
     };
-
+    
     if path.is_dir() {
         if let Ok(read) = fs::read_dir(path) {
             for entry in read.flatten() {

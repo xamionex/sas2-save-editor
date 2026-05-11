@@ -48,7 +48,9 @@ pub struct SaveEditorConfig {
     pub bestiary_panel_width: f32,
 }
 
-pub fn default_item_icon_size() -> f32 { 52.0 }
+pub fn default_item_icon_size() -> f32 {
+    52.0
+}
 pub fn default_item_font_size() -> f32 {
     12.0
 }

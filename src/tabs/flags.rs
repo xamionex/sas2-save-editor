@@ -1,8 +1,8 @@
 use crate::app::SaveEditor;
 use eframe::egui;
 use egui::{ScrollArea, Ui};
-use sas2_parser::types::ng_level;
 use sas2_parser::SaveData;
+use sas2_parser::types::ng_level;
 
 impl SaveEditor {
     pub fn show_flags_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {

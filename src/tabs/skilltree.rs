@@ -1,8 +1,8 @@
 use crate::app::SaveEditor;
 use eframe::egui;
-use egui::{pos2, Rect, Stroke, Ui};
-use sas2_parser::skilltree::{SkillTreeCatalog, SKILL_IMG};
+use egui::{Rect, Stroke, Ui, pos2};
 use sas2_parser::SaveData;
+use sas2_parser::skilltree::{SKILL_IMG, SkillTreeCatalog};
 
 impl SaveEditor {
     /// Sum of (node.cost * unlock_level) across the entire tree.

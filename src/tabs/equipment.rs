@@ -4,7 +4,7 @@ use crate::tabs::EquipmentSubTab;
 use eframe::egui;
 use egui::{Response, ScrollArea, Ui};
 use sas2_parser::loot_catalog::LootDef;
-use sas2_parser::{loot_names, Item, SaveData};
+use sas2_parser::{Item, SaveData, loot_names};
 
 /// Draw one icon button from the atlas.
 /// If either the atlas or the def is missing (or the def has no icon), an invisible placeholder of the same size is rendered so the grid columns stay aligned.
