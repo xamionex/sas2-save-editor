@@ -3,22 +3,23 @@ use crate::catalog::{
     load_loot_catalog, load_monster_catalog, load_skilltree_catalog, load_skilltree_texture,
 };
 use crate::config::{
-    default_drag_sensitivity, default_item_font_size, default_item_icon_size, SaveEditorConfig,
+    SaveEditorConfig, default_drag_sensitivity, default_item_font_size, default_item_icon_size,
 };
 use crate::export::{
-    build_xnb_tree, show_export_picker, show_export_progress, start_export_job, ExportState,
-    XnbNode,
+    ExportState, XnbNode, build_xnb_tree, show_export_picker, show_export_progress,
+    start_export_job,
 };
 use crate::tabs::{EquipmentSubTab, Tab};
-use eframe::{egui, Frame};
+use eframe::{Frame, egui};
 use egui::{Rect, TextureHandle, Ui};
 use rfd::FileDialog;
+use sas2_parser::SaveData;
 use sas2_parser::loot_catalog::LootCatalog;
 use sas2_parser::monster_catalog::MonsterCatalog;
 use sas2_parser::skilltree::SkillTreeCatalog;
-use sas2_parser::SaveData;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 
 pub struct SaveEditor {
     pub load_requested: bool,
@@ -63,6 +64,8 @@ pub struct SaveEditor {
     pub add_item_upgrade: i32,
 
     // XNB exporter
+    pub export_tree_loading: bool,
+    pub export_tree_receiver: Option<std::sync::mpsc::Receiver<Option<XnbNode>>>,
     pub export_picker: Option<XnbNode>,
     pub export_picker_open: bool,
     pub export_state: Option<ExportState>,
@@ -124,6 +127,8 @@ impl Default for SaveEditor {
             add_item_count: 1,
             add_item_upgrade: 0,
 
+            export_tree_loading: false,
+            export_tree_receiver: None,
             export_picker: None,
             export_picker_open: false,
             export_state: None,
@@ -169,7 +174,9 @@ impl SaveEditor {
                 self.monster_catalog_error = None;
 
                 // start background texture loading
-                let names: Vec<String> = cat.monsters.iter()
+                let names: Vec<String> = cat
+                    .monsters
+                    .iter()
                     .filter(|m| !m.texture.is_empty())
                     .map(|m| m.texture.clone())
                     .collect();
@@ -303,8 +310,21 @@ impl SaveEditor {
             }
         };
 
-        self.export_picker = build_xnb_tree(&game_path);
-        self.export_picker_open = true;
+        // Start scanning in a background thread.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let scan_root = game_path.join("Content");
+        let scan_root = if scan_root.is_dir() { scan_root } else {
+            self.error_message = Some("Game doesn't have Content folder".to_string());
+            return;
+        };
+
+        std::thread::spawn(move || {
+            let tree = build_xnb_tree(&scan_root);
+            let _ = tx.send(tree);
+        });
+
+        self.export_tree_receiver = Some(rx);
+        self.export_tree_loading = true;
     }
 
     pub fn show_settings_window(&mut self, ctx: &egui::Context) {
@@ -573,6 +593,28 @@ impl eframe::App for SaveEditor {
         self.monster_texture_cache.update(ctx);
         if self.monster_texture_cache.is_loading() {
             ctx.request_repaint();
+        }
+
+        // Check for XNB tree completion
+        if self.export_tree_loading {
+            if let Some(rx) = &self.export_tree_receiver {
+                if let Ok(tree) = rx.try_recv() {
+                    // Tree ready!
+                    self.export_picker = tree;
+                    self.export_picker_open = true;
+                    self.export_tree_loading = false;
+                    self.export_tree_receiver = None;
+                } else {
+                    // Still scanning, keep refreshing
+                    ctx.request_repaint();
+                }
+            }
+        }
+
+        if let Some(state) = &self.export_state {
+            if !state.done.load(Ordering::Relaxed) {
+                ctx.request_repaint();
+            }
         }
 
         if self.config_save_timer > 0.0 {

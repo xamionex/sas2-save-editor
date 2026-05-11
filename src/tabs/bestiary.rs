@@ -1,8 +1,8 @@
-use std::collections::HashMap;
 use crate::app::SaveEditor;
 use eframe::egui;
 use egui::Ui;
 use sas2_parser::{BestiaryBeast, SaveData};
+use std::collections::HashMap;
 
 impl SaveEditor {
     pub fn show_bestiary_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
@@ -18,7 +18,10 @@ impl SaveEditor {
                     }
                 });
             if let Some(err) = &self.monster_catalog_error {
-                ui.colored_label(egui::Color32::RED, format!("Monster catalog error: {}", err));
+                ui.colored_label(
+                    egui::Color32::RED,
+                    format!("Monster catalog error: {}", err),
+                );
             }
             return;
         }
@@ -105,19 +108,21 @@ impl SaveEditor {
                 .iter()
                 .enumerate()
                 .filter(|(idx, _beast)| {
-                    let name = catalog.monsters.get(*idx)
+                    let name = catalog
+                        .monsters
+                        .get(*idx)
                         .map(|m| m.titles[0].as_str())
                         .unwrap_or("");
                     name.to_lowercase().contains(&filter) || idx.to_string().contains(&filter)
                 })
                 .map(|(idx, _beast)| {
-                    let tex = catalog.monsters.get(idx)
-                        .and_then(|def| self.monster_texture_cache.get_or_assemble(
-                            ui.ctx(),
-                            &def.def,
-                            &def.texture,
-                        ));
-                    let name = catalog.monsters.get(idx)
+                    let tex = catalog.monsters.get(idx).and_then(|def| {
+                        self.monster_texture_cache
+                            .get_or_assemble(ui.ctx(), &def.def, &def.texture)
+                    });
+                    let name = catalog
+                        .monsters
+                        .get(idx)
                         .map(|m| m.titles[0].as_str())
                         .unwrap_or("");
                     (idx, name, tex)
@@ -125,9 +130,12 @@ impl SaveEditor {
                 .collect();
 
             // Group by type/subtype
-            let mut grouped: HashMap<String, Vec<(usize, &str, Option<egui::TextureHandle>)>> = HashMap::new();
+            let mut grouped: HashMap<String, Vec<(usize, &str, Option<egui::TextureHandle>)>> =
+                HashMap::new();
             for (idx, name, tex) in filtered {
-                let cat = catalog.monsters.get(idx)
+                let cat = catalog
+                    .monsters
+                    .get(idx)
                     .map(|m| format!("Type {} - SubType {}", m.type_, m.sub_type))
                     .unwrap_or_else(|| "Unknown".to_string());
                 grouped.entry(cat).or_default().push((idx, name, tex));
@@ -150,11 +158,17 @@ impl SaveEditor {
                                     let response = if let Some(tex) = tex {
                                         ui.add(egui::Button::image(
                                             egui::Image::from_texture(&tex.clone())
-                                                .fit_to_exact_size(egui::vec2(self.config.item_icon_size, self.config.item_icon_size)),
+                                                .fit_to_exact_size(egui::vec2(
+                                                    self.config.item_icon_size,
+                                                    self.config.item_icon_size,
+                                                )),
                                         ))
                                     } else {
                                         ui.allocate_response(
-                                            egui::vec2(self.config.item_icon_size, self.config.item_icon_size),
+                                            egui::vec2(
+                                                self.config.item_icon_size,
+                                                self.config.item_icon_size,
+                                            ),
                                             egui::Sense::click(),
                                         )
                                     };
@@ -164,10 +178,13 @@ impl SaveEditor {
                                     ui.set_max_width(response.rect.width());
                                     for word in name.split_whitespace() {
                                         ui.add(
-                                            egui::Label::new(egui::RichText::new(word).size(self.config.item_font_size))
-                                                .wrap_mode(egui::TextWrapMode::Truncate)
-                                                .halign(egui::Align::Center)
-                                                .show_tooltip_when_elided(false),
+                                            egui::Label::new(
+                                                egui::RichText::new(word)
+                                                    .size(self.config.item_font_size),
+                                            )
+                                            .wrap_mode(egui::TextWrapMode::Truncate)
+                                            .halign(egui::Align::Center)
+                                            .show_tooltip_when_elided(false),
                                         );
                                     }
                                 });
