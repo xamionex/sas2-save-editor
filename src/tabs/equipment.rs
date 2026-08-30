@@ -29,11 +29,17 @@ pub fn draw_image_button(
 }
 
 /// Render a word-wrapped item name at `font_size` points.
+/// When `selected`, the name is green.
 /// Each whitespace-separated word gets its own truncating label so long names don't overflow their icon column.
-pub fn add_item_label(ui: &mut Ui, title: &str, font_size: f32) {
+pub fn add_item_label(ui: &mut Ui, title: &str, font_size: f32, selected: bool) {
+    let color = if selected {
+        egui::Color32::LIGHT_GREEN
+    } else {
+        ui.visuals().text_color()
+    };
     for word in title.split_whitespace() {
         ui.add(
-            egui::Label::new(egui::RichText::new(word).size(font_size))
+            egui::Label::new(egui::RichText::new(word).size(font_size).color(color))
                 .wrap_mode(egui::TextWrapMode::Truncate)
                 .halign(egui::Align::Center)
                 .show_tooltip_when_elided(false),
@@ -45,6 +51,11 @@ impl SaveEditor {
     /// Full item detail panel: name, title, description, type/subtype, cost, editable count/upgrade, and a collapsible raw-fields section.
     /// Used both in the inventory view and the catalog add-item preview.
     pub fn draw_item_details(&self, ui: &mut Ui, def: &LootDef, item: &mut Item) {
+        ui.style_mut().override_text_style = Some(egui::TextStyle::Body);
+        ui.style_mut().text_styles.insert(
+            egui::TextStyle::Body,
+            egui::FontId::proportional(self.config.sidebar_font_size),
+        );
         ui.heading("Item Details");
         ui.separator();
 
@@ -181,7 +192,7 @@ impl SaveEditor {
 
         // Extract Copy config values up front so the closures below don't need to borrow all of `self` while we also hold field-level borrows.
         let icon_size = self.config.item_icon_size;
-        let font_size = self.config.item_font_size;
+        let font_size = self.config.grid_font_size;
         let mut selected_local = self.selected_equipment_item;
         let full_width = ui.available_width();
         let min_size = 250.0;
@@ -271,7 +282,7 @@ impl SaveEditor {
                         let orig_indices = grouped.get(&cat).unwrap();
 
                         ui.style_mut().interaction.selectable_labels = false;
-                        ui.label(egui::RichText::new(&cat).strong());
+                        ui.label(egui::RichText::new(&cat).strong().size(self.config.category_font_size));
 
                         egui::Grid::new(&cat).spacing([8.0, 8.0]).show(ui, |ui| {
                             for &orig_idx in orig_indices {
@@ -306,7 +317,12 @@ impl SaveEditor {
                                     }
 
                                     ui.set_max_width(btn_w);
-                                    add_item_label(ui, &name, font_size);
+                                    add_item_label(
+                                        ui,
+                                        &name,
+                                        font_size,
+                                        selected_local == Some(orig_idx),
+                                    );
                                 });
                             }
                         });
@@ -363,7 +379,7 @@ impl SaveEditor {
         }
 
         let icon_size = self.config.item_icon_size;
-        let font_size = self.config.item_font_size;
+        let font_size = self.config.grid_font_size;
         let full_width = ui.available_width();
         let min_size = 250.0;
         let panel_width = if self.config.equipment_panel_width > 0.0 {
@@ -461,7 +477,7 @@ impl SaveEditor {
                         let items = grouped.get(&cat).unwrap();
 
                         ui.style_mut().interaction.selectable_labels = false;
-                        ui.label(egui::RichText::new(&cat).strong());
+                        ui.label(egui::RichText::new(&cat).strong().size(self.config.category_font_size));
 
                         egui::Grid::new(&cat).spacing([8.0, 8.0]).show(ui, |ui| {
                             for (idx, def) in items {
@@ -480,6 +496,7 @@ impl SaveEditor {
                                         ui,
                                         def.title.first().map(|s| s.as_str()).unwrap_or(""),
                                         font_size,
+                                        self.selected_catalog_item == Some(*idx),
                                     );
                                 });
                             }

@@ -180,7 +180,7 @@ impl SaveEditor {
                                         ui.add(
                                             egui::Label::new(
                                                 egui::RichText::new(word)
-                                                    .size(self.config.item_font_size),
+                                                    .size(self.config.grid_font_size),
                                             )
                                             .wrap_mode(egui::TextWrapMode::Truncate)
                                             .halign(egui::Align::Center)

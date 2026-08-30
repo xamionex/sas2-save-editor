@@ -1,4 +1,5 @@
 mod app;
+mod artifact;
 mod atlas;
 mod catalog;
 mod config;
@@ -6,6 +7,7 @@ mod export;
 mod tabs;
 
 use crate::app::SaveEditor;
+use crate::config::SaveEditorConfig;
 #[cfg(not(debug_assertions))]
 use hide_console::hide_console;
 
@@ -43,10 +45,27 @@ fn main() -> eframe::Result<()> {
         sas2_parser::set_monster_logging_enabled(false);
     }
 
-    let options = eframe::NativeOptions::default();
+    let config = SaveEditorConfig::load();
+    let mut builder = egui::ViewportBuilder::default().with_title("SaS2 Save Editor");
+    if config.save_window_position {
+        if let Some([x, y]) = config.window_pos {
+            builder = builder.with_position(egui::pos2(x, y));
+        }
+        if let Some([w, h]) = config.window_size {
+            builder = builder.with_inner_size(egui::vec2(w, h));
+        }
+    }
+    if config.save_window_state && config.window_maximized {
+        builder = builder.with_maximized(true);
+    }
+
+    let options = eframe::NativeOptions {
+        viewport: builder,
+        ..Default::default()
+    };
     eframe::run_native(
         "SaS2 Save Editor",
         options,
-        Box::new(|_cc| Ok(Box::new(SaveEditor::default()))),
+        Box::new(|_cc| Ok(Box::new(SaveEditor::with_config(config)))),
     )
 }

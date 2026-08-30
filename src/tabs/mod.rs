@@ -1,3 +1,4 @@
+pub mod artifacts;
 pub mod bestiary;
 pub mod convert;
 pub mod cosmetics;
@@ -16,6 +17,7 @@ pub enum Tab {
     Cosmetics,
     SkillTree,
     Faction,
+    Artifacts,
     ConvertSave,
 }
 

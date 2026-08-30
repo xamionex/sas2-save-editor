@@ -413,7 +413,7 @@ impl SaveEditor {
 
                 // Class unlock nodes get decorative markers (line, X, asterisk)
                 if is_class_unlock {
-                    let w = 2.0;
+                    let w = 2.0_f32;
                     painter.circle_stroke(rect.center(), icon_display_size, Stroke::new(w, tint));
 
                     let c = rect.center();

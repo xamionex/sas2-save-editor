@@ -3,7 +3,8 @@ use crate::catalog::{
     load_loot_catalog, load_monster_catalog, load_skilltree_catalog, load_skilltree_texture,
 };
 use crate::config::{
-    SaveEditorConfig, default_drag_sensitivity, default_item_font_size, default_item_icon_size,
+    SaveEditorConfig, default_category_font_size, default_drag_sensitivity, default_grid_font_size,
+    default_item_icon_size, default_sidebar_font_size, default_tabs_font_size,
 };
 use crate::export::{
     ExportState, XnbNode, build_xnb_tree, show_export_picker, show_export_progress,
@@ -63,6 +64,13 @@ pub struct SaveEditor {
     pub add_item_count: i32,
     pub add_item_upgrade: i32,
 
+    // Artifacts tab state
+    pub selected_artifact: Option<usize>,
+    /// Desired value for the "Reroll until desired" button, per artifact field.
+    pub artifact_desired_values: std::collections::HashMap<i32, f32>,
+    /// Result of the last search: (found, message).
+    pub artifact_search_result: Option<(bool, String)>,
+
     // XNB exporter
     pub export_tree_loading: bool,
     pub export_tree_receiver: Option<std::sync::mpsc::Receiver<Option<XnbNode>>>,
@@ -87,10 +95,9 @@ pub struct SaveEditor {
     pub prev_canvas_rect: Option<Rect>,
 }
 
-impl Default for SaveEditor {
-    fn default() -> Self {
-        let config = SaveEditorConfig::load();
-
+impl SaveEditor {
+    /// Construct the app with a pre-loaded config (used by main.rs so window position/state can be applied before the window opens).
+    pub fn with_config(config: SaveEditorConfig) -> Self {
         let mut app = Self {
             load_requested: false,
             save_data: None,
@@ -127,6 +134,10 @@ impl Default for SaveEditor {
             add_item_count: 1,
             add_item_upgrade: 0,
 
+            selected_artifact: None,
+            artifact_desired_values: std::collections::HashMap::new(),
+            artifact_search_result: None,
+
             export_tree_loading: false,
             export_tree_receiver: None,
             export_picker: None,
@@ -152,6 +163,12 @@ impl Default for SaveEditor {
         }
 
         app
+    }
+}
+
+impl Default for SaveEditor {
+    fn default() -> Self {
+        Self::with_config(SaveEditorConfig::load())
     }
 }
 
@@ -362,10 +379,10 @@ impl SaveEditor {
                     });
 
                     ui.horizontal(|ui| {
-                        ui.label("Item Font Size:");
+                        ui.label("Grid Font Size:");
                         if ui
                             .add(
-                                egui::DragValue::new(&mut self.config.item_font_size)
+                                egui::DragValue::new(&mut self.config.grid_font_size)
                                     .range(6.0..=24.0)
                                     .speed(self.config.drag_value_sensitivity)
                                     .suffix("pt"),
@@ -375,7 +392,64 @@ impl SaveEditor {
                             self.config_save_timer = 0.1;
                         }
                         if ui.button("Reset").clicked() {
-                            self.config.item_font_size = default_item_font_size();
+                            self.config.grid_font_size = default_grid_font_size();
+                            self.config_save_timer = 0.1;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Sidebar Font Size:");
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut self.config.sidebar_font_size)
+                                    .range(6.0..=24.0)
+                                    .speed(self.config.drag_value_sensitivity)
+                                    .suffix("pt"),
+                            )
+                            .changed()
+                        {
+                            self.config_save_timer = 0.1;
+                        }
+                        if ui.button("Reset").clicked() {
+                            self.config.sidebar_font_size = default_sidebar_font_size();
+                            self.config_save_timer = 0.1;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Tabs Font Size:");
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut self.config.tabs_font_size)
+                                    .range(6.0..=24.0)
+                                    .speed(self.config.drag_value_sensitivity)
+                                    .suffix("pt"),
+                            )
+                            .changed()
+                        {
+                            self.config_save_timer = 0.1;
+                        }
+                        if ui.button("Reset").clicked() {
+                            self.config.tabs_font_size = default_tabs_font_size();
+                            self.config_save_timer = 0.1;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Category Font Size:");
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut self.config.category_font_size)
+                                    .range(6.0..=24.0)
+                                    .speed(self.config.drag_value_sensitivity)
+                                    .suffix("pt"),
+                            )
+                            .changed()
+                        {
+                            self.config_save_timer = 0.1;
+                        }
+                        if ui.button("Reset").clicked() {
+                            self.config.category_font_size = default_category_font_size();
                             self.config_save_timer = 0.1;
                         }
                     });
@@ -415,6 +489,27 @@ impl SaveEditor {
                             self.config_save_timer = 0.1;
                         }
                     });
+
+                    ui.separator();
+                    ui.heading("Window");
+                    if ui
+                        .checkbox(
+                            &mut self.config.save_window_position,
+                            "Save window position",
+                        )
+                        .changed()
+                    {
+                        self.config_save_timer = 0.1;
+                    }
+                    if ui
+                        .checkbox(
+                            &mut self.config.save_window_state,
+                            "Save window state (maximized)",
+                        )
+                        .changed()
+                    {
+                        self.config_save_timer = 0.1;
+                    }
                 });
             });
 
@@ -502,14 +597,16 @@ impl eframe::App for SaveEditor {
                     .show_separator_line(false)
                     .show_inside(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.selectable_value(&mut self.active_tab, Tab::Stats, "Stats");
-                            ui.selectable_value(&mut self.active_tab, Tab::Equipment, "Equipment");
-                            ui.selectable_value(&mut self.active_tab, Tab::SkillTree, "Skill Tree");
-                            ui.selectable_value(&mut self.active_tab, Tab::Cosmetics, "Cosmetics");
-                            ui.selectable_value(&mut self.active_tab, Tab::Flags, "Flags");
-                            ui.selectable_value(&mut self.active_tab, Tab::Bestiary, "Bestiary");
-                            ui.selectable_value(&mut self.active_tab, Tab::Faction, "Faction");
-                            ui.selectable_value(&mut self.active_tab, Tab::ConvertSave, "Convert modded to vanilla save");
+                            let tabs = self.config.tabs_font_size;
+                            ui.selectable_value(&mut self.active_tab, Tab::Stats, egui::RichText::new("Stats").size(tabs));
+                            ui.selectable_value(&mut self.active_tab, Tab::Equipment, egui::RichText::new("Equipment").size(tabs));
+                            ui.selectable_value(&mut self.active_tab, Tab::SkillTree, egui::RichText::new("Skill Tree").size(tabs));
+                            ui.selectable_value(&mut self.active_tab, Tab::Cosmetics, egui::RichText::new("Cosmetics").size(tabs));
+                            ui.selectable_value(&mut self.active_tab, Tab::Flags, egui::RichText::new("Flags").size(tabs));
+                            ui.selectable_value(&mut self.active_tab, Tab::Bestiary, egui::RichText::new("Bestiary").size(tabs));
+                            ui.selectable_value(&mut self.active_tab, Tab::Faction, egui::RichText::new("Faction").size(tabs));
+                            ui.selectable_value(&mut self.active_tab, Tab::Artifacts, egui::RichText::new("Artifacts").size(tabs));
+                            ui.selectable_value(&mut self.active_tab, Tab::ConvertSave, egui::RichText::new("Convert modded to vanilla save").size(tabs));
 
                             ui.vertical(|ui| {
                                 // progress bar while textures are loading
@@ -532,6 +629,7 @@ impl eframe::App for SaveEditor {
                     Tab::Flags => self.show_flags_ui(ui, save),
                     Tab::Bestiary => self.show_bestiary_ui(ui, save),
                     Tab::Faction => self.show_faction_ui(ui, save),
+                    Tab::Artifacts => self.show_artifacts_ui(ui, save),
                     Tab::ConvertSave => self.show_convert_save_ui(ui, save),
                 }
 
@@ -614,6 +712,39 @@ impl eframe::App for SaveEditor {
         if let Some(state) = &self.export_state {
             if !state.done.load(Ordering::Relaxed) {
                 ctx.request_repaint();
+            }
+        }
+
+        // Persist window position/size/maximized state when enabled.
+        // Re-arms the throttled config save only when the window state actually changed.
+        if self.config.save_window_position || self.config.save_window_state {
+            let info = ctx.input(|i| i.viewport().clone());
+            let mut changed = false;
+            if self.config.save_window_position {
+                if let Some(rect) = info.outer_rect {
+                    let pos = [rect.min.x, rect.min.y];
+                    if self.config.window_pos != Some(pos) {
+                        self.config.window_pos = Some(pos);
+                        changed = true;
+                    }
+                }
+                if let Some(rect) = info.inner_rect {
+                    let size = [rect.width(), rect.height()];
+                    if self.config.window_size != Some(size) {
+                        self.config.window_size = Some(size);
+                        changed = true;
+                    }
+                }
+            }
+            if self.config.save_window_state {
+                let maximized = info.maximized.unwrap_or(false);
+                if self.config.window_maximized != maximized {
+                    self.config.window_maximized = maximized;
+                    changed = true;
+                }
+            }
+            if changed {
+                self.config_save_timer = 0.1;
             }
         }
 
