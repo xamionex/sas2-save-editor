@@ -64,6 +64,11 @@ pub struct SaveEditorConfig {
     #[serde(default = "default_true")]
     pub save_window_position: bool,
 
+    /// On Wayland, run through XWayland so the window position can be saved.
+    /// Native Wayland does not let clients read their own position, this only matters on Wayland sessions and is off by default.
+    #[serde(default)]
+    pub force_x11_for_position: bool,
+
     /// Remember and restore the window state (maximized) on startup.
     #[serde(default = "default_true")]
     pub save_window_state: bool,
@@ -125,6 +130,7 @@ impl Default for SaveEditorConfig {
             skilltree_panel_width: 0.0,
             bestiary_panel_width: 0.0,
             save_window_position: true,
+            force_x11_for_position: false,
             save_window_state: true,
             window_pos: None,
             window_size: None,

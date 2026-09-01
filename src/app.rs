@@ -524,6 +524,19 @@ impl SaveEditor {
                     }
                     if ui
                         .checkbox(
+                            &mut self.config.force_x11_for_position,
+                            "Force XWayland for position saving (Wayland only)",
+                        )
+                        .on_hover_text(
+                            "Native Wayland cannot read the window position. \
+                             Enabling this runs the app through XWayland so the position can be saved.",
+                        )
+                        .changed()
+                    {
+                        self.config_save_timer = 0.1;
+                    }
+                    if ui
+                        .checkbox(
                             &mut self.config.save_window_state,
                             "Save window state (maximized)",
                         )
@@ -608,8 +621,7 @@ impl eframe::App for SaveEditor {
 
             ui.separator();
 
-            // The borrow checker doesn't let us pass &mut self.save_data to
-            // a method that also borrows self, so we briefly take ownership.
+            // The borrow checker doesn't let us pass &mut self.save_data to a method that also borrows self, so we briefly take ownership.
             let mut save_taken = self.save_data.take();
 
             if let Some(save) = &mut save_taken {
@@ -742,6 +754,7 @@ impl eframe::App for SaveEditor {
             let info = ctx.input(|i| i.viewport().clone());
             let mut changed = false;
             if self.config.save_window_position {
+                // Position is unavailable on Wayland (winit cannot query it), keep the last known value in that case.
                 if let Some(rect) = info.outer_rect {
                     let pos = [rect.min.x, rect.min.y];
                     if self.config.window_pos != Some(pos) {
@@ -749,8 +762,15 @@ impl eframe::App for SaveEditor {
                         changed = true;
                     }
                 }
-                if let Some(rect) = info.inner_rect {
-                    let size = [rect.width(), rect.height()];
+                // Size: prefer inner_rect, fall back to the viewport content rect which is available on all platforms.
+                let size = info
+                    .inner_rect
+                    .map(|r| [r.width(), r.height()])
+                    .or_else(|| {
+                        let r = ctx.viewport_rect();
+                        Some([r.width(), r.height()])
+                    });
+                if let Some(size) = size {
                     if self.config.window_size != Some(size) {
                         self.config.window_size = Some(size);
                         changed = true;
