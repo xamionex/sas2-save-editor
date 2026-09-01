@@ -66,10 +66,24 @@ pub struct SaveEditor {
 
     // Artifacts tab state
     pub selected_artifact: Option<usize>,
-    /// Desired value for the "Reroll until desired" button, per artifact field.
+    /// Desired value for the "Find matching artifacts" button, per artifact field.
     pub artifact_desired_values: std::collections::HashMap<i32, f32>,
     /// Result of the last search: (found, message).
     pub artifact_search_result: Option<(bool, String)>,
+    /// Matching artifact seeds for the current search, sorted best first.
+    pub artifact_matches: Vec<crate::artifact::ArtifactMatch>,
+    /// Inventory index of the artifact the current matches are for.
+    pub artifact_match_target: Option<usize>,
+    /// When true, the match picker window is open.
+    pub artifact_match_picker_open: bool,
+    /// Search text for the match picker.
+    pub artifact_match_search: String,
+    /// Focus the match picker search on open.
+    pub artifact_match_focus: bool,
+    /// When true, "Find matching artifacts" searches all tiers instead of the current one.
+    pub artifact_try_all_tiers: bool,
+    /// Pending seed to apply from the match picker, processed next frame.
+    pub artifact_pending_apply: Option<i32>,
 
     // XNB exporter
     pub export_tree_loading: bool,
@@ -137,6 +151,13 @@ impl SaveEditor {
             selected_artifact: None,
             artifact_desired_values: std::collections::HashMap::new(),
             artifact_search_result: None,
+            artifact_matches: Vec::new(),
+            artifact_match_target: None,
+            artifact_match_picker_open: false,
+            artifact_match_search: String::new(),
+            artifact_match_focus: false,
+            artifact_try_all_tiers: false,
+            artifact_pending_apply: None,
 
             export_tree_loading: false,
             export_tree_receiver: None,

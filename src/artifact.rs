@@ -387,7 +387,8 @@ pub fn load_resalter_artifact_boosts(game_path: &Path) -> HashMap<i32, ArtifactB
 }
 
 /// The achievable value range for an artifact field at a given tier, without any mod.
-/// Returns None when the field can never be nonzero at that tier.
+/// Returns None when the field can never be nonzero at that tier
+/// (wrong subtype or too few sub-stat rolls).
 pub fn vanilla_value_range(subtype: i32, tier: i32, field: i32) -> Option<(f32, f32)> {
     let num = tier.min(40);
     let main = artifact_main_field(subtype);
@@ -398,6 +399,18 @@ pub fn vanilla_value_range(subtype: i32, tier: i32, field: i32) -> Option<(f32, 
             _ => ((num + 1) as f32 * 0.25, 3.0, 20.0),
         };
         return Some((raw_min, (raw_min + rand_range).min(cap)));
+    }
+    // Sub-stat: only fields the subtype can actually roll are reachable.
+    // Attack rolls 1..=12, Defense rolls 14..=25, Utility rolls 27..=34.
+    // Fields outside the set are never set, regardless of tier.
+    let rollable = match subtype {
+        3 => 1..=12,
+        4 => 14..=25,
+        5 => 27..=34,
+        _ => return None,
+    };
+    if !rollable.contains(&field) {
+        return None;
     }
     // Sub-stat: only reachable when the sub-stat count roll allows it.
     let sub_count = match subtype {
@@ -445,76 +458,78 @@ pub fn effective_value_range(
     vanilla_value_range(subtype, tier, field)
 }
 
-/// Result of a best-effort seed search.
-pub struct SeedSearchResult {
-    /// The best seed found.
+/// A candidate artifact seed whose values contain all the desired fields.
+#[derive(Clone)]
+pub struct ArtifactMatch {
+    /// The seed of the matching artifact.
     pub seed: i32,
-    /// Fields that matched within tolerance.
-    pub matched: Vec<i32>,
-    /// Fields that did not match: (field, desired, actual).
-    pub missed: Vec<(i32, f32, f32)>,
+    /// The tier the seed belongs to (seed / 2000).
+    pub tier: i32,
+    /// (field, actual value) for each desired field, in desired order.
+    pub values: Vec<(i32, f32)>,
+    /// Total absolute deviation from the desired values (0 = exact match).
+    pub error: f32,
 }
 
-/// Search all seeds in a tier.
-/// Returns a perfect match when one exists, otherwise the seed matching the most desired fields, with the smallest total deviation among ties.
-pub fn find_best_seed_for_values(
-    subtype: i32,
-    tier: i32,
-    desired: &[(i32, f32)],
-    max_attempts: usize,
-) -> Option<SeedSearchResult> {
+/// Find all seeds in a tier whose artifact has all the desired fields set
+/// (nonzero value), sorted by closeness to the desired values (best first).
+pub fn find_matching_seeds(subtype: i32, tier: i32, desired: &[(i32, f32)]) -> Vec<ArtifactMatch> {
     if desired.is_empty() {
-        return None;
+        return Vec::new();
     }
     let (min, max) = tier_seed_range(tier);
-    let attempts = ((max - min + 1) as usize).min(max_attempts);
-    let mut best: Option<SeedSearchResult> = None;
+    let mut matches = Vec::new();
     for seed in min..=max {
-        if (seed - min) as usize >= attempts {
-            break;
-        }
         let values = compute_artifact_values(seed, subtype, tier);
-        let mut matched = Vec::new();
-        let mut missed = Vec::new();
+        let mut all_present = true;
+        let mut error = 0.0;
+        let mut vals = Vec::with_capacity(desired.len());
         for (field, want) in desired {
             let actual = values[*field as usize];
-            if (actual - *want).abs() <= 0.05 {
-                matched.push(*field);
-            } else {
-                missed.push((*field, *want, actual));
+            if actual <= 0.0 {
+                all_present = false;
+                break;
             }
+            error += (actual - want).abs();
+            vals.push((*field, actual));
         }
-        if matched.len() == desired.len() {
-            return Some(SeedSearchResult {
+        if all_present {
+            matches.push(ArtifactMatch {
                 seed,
-                matched,
-                missed,
-            });
-        }
-        let better = match &best {
-            None => true,
-            Some(b) => {
-                matched.len() > b.matched.len()
-                    || (matched.len() == b.matched.len()
-                        && total_error(&missed) < total_error(&b.missed))
-            }
-        };
-        if better {
-            best = Some(SeedSearchResult {
-                seed,
-                matched,
-                missed,
+                tier,
+                values: vals,
+                error,
             });
         }
     }
-    best
+    matches.sort_by(|a, b| a.error.total_cmp(&b.error));
+    matches
 }
 
-fn total_error(missed: &[(i32, f32, f32)]) -> f32 {
-    missed
-        .iter()
-        .map(|(_, want, actual)| (actual - want).abs())
-        .sum()
+/// Find all seeds across every tier 0..=max_tier whose artifact has all the
+/// desired fields set, sorted by closeness to the desired values (best first).
+pub fn find_matching_seeds_all_tiers(
+    subtype: i32,
+    max_tier: i32,
+    desired: &[(i32, f32)],
+) -> Vec<ArtifactMatch> {
+    if desired.is_empty() {
+        return Vec::new();
+    }
+    let mut matches = Vec::new();
+    for tier in 0..=max_tier {
+        matches.extend(find_matching_seeds(subtype, tier, desired));
+    }
+    matches.sort_by(|a, b| a.error.total_cmp(&b.error));
+    matches
+}
+
+/// Remap a seed into another tier, preserving the within-tier offset.
+/// Seed ranges are tier * 2000 + 1..=tier * 2000 + 2000.
+pub fn seed_for_tier(seed: i32, tier: i32) -> i32 {
+    let offset = seed % 2000;
+    let offset = if offset == 0 { 2000 } else { offset };
+    tier * 2000 + offset
 }
 
 /// The seed range for a tier: tier * 2000 + 1..=2000.
@@ -587,57 +602,100 @@ mod tests {
     }
 
     #[test]
-    fn find_seed_matches_desired() {
-        // Find a seed for attack damage 3% at tier 6 (range 1.75..=4.75), then verify it.
-        let result = find_best_seed_for_values(3, 6, &[(0, 3.0)], 200_000).expect("seed should exist");
-        assert!(result.missed.is_empty());
-        let values = compute_artifact_values(result.seed, 3, 6);
-        assert!((values[0] - 3.0).abs() <= 0.05);
-        // The seed must be in the tier range: tier 6 = 12001..=14000.
-        assert!((12001..=14000).contains(&result.seed));
+    fn vanilla_ranges_respect_subtype() {
+        // Attack artifacts can never roll defense/utility fields.
+        assert!(vanilla_value_range(3, 40, 13).is_none());
+        assert!(vanilla_value_range(3, 40, 27).is_none());
+        // Defense artifacts can never roll attack/utility fields.
+        assert!(vanilla_value_range(4, 40, 0).is_none());
+        assert!(vanilla_value_range(4, 40, 1).is_none());
+        assert!(vanilla_value_range(4, 40, 4).is_none());
+        assert!(vanilla_value_range(4, 40, 5).is_none());
+        assert!(vanilla_value_range(4, 40, 27).is_none());
+        // Utility artifacts can never roll attack/defense fields.
+        assert!(vanilla_value_range(5, 40, 0).is_none());
+        assert!(vanilla_value_range(5, 40, 13).is_none());
+        // But their own rollable sub-stats are reachable at tier >= 1.
+        assert!(vanilla_value_range(3, 40, 1).is_some());
+        assert!(vanilla_value_range(3, 40, 12).is_some());
+        assert!(vanilla_value_range(4, 40, 14).is_some());
+        assert!(vanilla_value_range(4, 40, 25).is_some());
+        assert!(vanilla_value_range(5, 40, 27).is_some());
+        assert!(vanilla_value_range(5, 40, 34).is_some());
     }
 
     #[test]
-    fn find_seed_matches_multiple_desired() {
-        // Find a seed for field 0, then use its field 1 value as the second desired value.
-        // That seed itself matches the combo, so the search must find something.
-        let seed_a = find_best_seed_for_values(3, 6, &[(0, 3.0)], 200_000)
-            .expect("seed should exist");
-        let values_a = compute_artifact_values(seed_a.seed, 3, 6);
-        let v1 = values_a[1];
-        let result = find_best_seed_for_values(3, 6, &[(0, 3.0), (1, v1)], 200_000)
-            .expect("seed should exist");
-        assert!(result.missed.is_empty());
-        let values = compute_artifact_values(result.seed, 3, 6);
-        assert!((values[0] - 3.0).abs() <= 0.05);
-        assert!((values[1] - v1).abs() <= 0.05);
-    }
-
-    #[test]
-    fn find_seed_impossible_returns_none() {
-        // 100% is impossible for any attack artifact field: the best result has no matched fields.
-        let result = find_best_seed_for_values(3, 6, &[(0, 100.0)], 200_000)
-            .expect("best seed should exist");
-        assert!(result.matched.is_empty());
-        assert_eq!(result.missed.len(), 1);
-        // Empty desired list never matches.
-        assert!(find_best_seed_for_values(3, 6, &[], 200_000).is_none());
-    }
-
-    #[test]
-    fn find_best_seed_prefers_more_matches() {
-        // A combo that cannot match exactly: field 0 = 3.0 and field 1 = 0.0 (field 1 is never 0 when the artifact has sub-stats, but a seed with only the main stat has field 1 = 0).
-        // The best result should match field 0 and report field 1 as missed, or match both when possible.
-        let result = find_best_seed_for_values(3, 6, &[(0, 3.0), (1, 0.0)], 200_000)
-            .expect("seed should exist");
-        // At least one field must match.
-        assert!(!result.matched.is_empty() || !result.missed.is_empty());
-        // The reported seed must reproduce the matched fields.
-        let values = compute_artifact_values(result.seed, 3, 6);
-        for f in &result.matched {
-            let want = if *f == 0 { 3.0 } else { 0.0 };
-            assert!((values[*f as usize] - want).abs() <= 0.05);
+    fn find_matching_seeds_works() {
+        // Find seeds for attack damage 3% at tier 6 (range 1.75..=4.75).
+        let matches = find_matching_seeds(3, 6, &[(0, 3.0)]);
+        assert!(!matches.is_empty());
+        // All matches must be in the tier range and have the field set.
+        for m in &matches {
+            assert!((12001..=14000).contains(&m.seed));
+            let values = compute_artifact_values(m.seed, 3, 6);
+            assert!(values[0] > 0.0);
         }
+        // Sorted by error ascending: the first is the closest to 3.0.
+        assert!(matches.first().unwrap().error <= matches.last().unwrap().error);
+    }
+
+    #[test]
+    fn find_matching_seeds_all_present() {
+        // Pick a seed whose artifact has a sub-stat (field 1), then use its
+        // field 1 value as the second desired value. That seed itself has both
+        // fields, so the search must find it.
+        let matches = find_matching_seeds(3, 6, &[(0, 3.0)]);
+        assert!(!matches.is_empty());
+        let seed_a = matches
+            .iter()
+            .find(|m| {
+                compute_artifact_values(m.seed, 3, 6)[1] > 0.0
+            })
+            .expect("a match with a sub-stat should exist");
+        let seed_a = seed_a.seed;
+        let values_a = compute_artifact_values(seed_a, 3, 6);
+        let v1 = values_a[1];
+        let matches2 = find_matching_seeds(3, 6, &[(0, 3.0), (1, v1)]);
+        assert!(matches2.iter().any(|m| m.seed == seed_a));
+        // Every match has all desired fields present.
+        for m in &matches2 {
+            let values = compute_artifact_values(m.seed, 3, 6);
+            assert!(values[0] > 0.0 && values[1] > 0.0);
+        }
+    }
+
+    #[test]
+    fn find_matching_seeds_all_tiers_works() {
+        // Across all tiers, matches from multiple tiers exist.
+        let matches = find_matching_seeds_all_tiers(3, 40, &[(0, 3.0)]);
+        assert!(!matches.is_empty());
+        // Each match carries its correct tier and seed range.
+        for m in &matches {
+            // Seed ranges are tier * 2000 + 1..=tier * 2000 + 2000.
+            assert_eq!(m.tier, (m.seed - 1) / 2000);
+            assert!(m.tier <= 40);
+        }
+        // Sorted by error ascending.
+        assert!(matches.first().unwrap().error <= matches.last().unwrap().error);
+    }
+
+    #[test]
+    fn find_matching_seeds_empty_and_impossible() {
+        // Empty desired list returns nothing.
+        assert!(find_matching_seeds(3, 6, &[]).is_empty());
+        // 100% attack damage is impossible; main stat always set, so matches
+        // still list artifacts (all contain Attack Damage), just far from 100.
+        let matches = find_matching_seeds(3, 6, &[(0, 100.0)]);
+        assert!(!matches.is_empty());
+    }
+
+    #[test]
+    fn seed_for_tier_preserves_offset() {
+        assert_eq!(seed_for_tier(1234, 0), 1234);
+        assert_eq!(seed_for_tier(1234, 5), 5 * 2000 + 1234);
+        // Seed exactly at a tier boundary (2000) maps to offset 2000.
+        assert_eq!(seed_for_tier(2000, 1), 1 * 2000 + 2000);
+        assert_eq!(seed_for_tier(6000, 2), 2 * 2000 + 2000);
     }
 
     #[test]

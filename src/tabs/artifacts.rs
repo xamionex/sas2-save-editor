@@ -2,7 +2,8 @@ use crate::app::SaveEditor;
 use crate::artifact::{
     ARTIFACT_FIELDS, artifact_main_field, artifact_rarity, artifact_seed, artifact_tier,
     charm_effective, charm_unit, charm_vanilla, compute_artifact_values, effective_value_range,
-    find_best_seed_for_values, load_resalter_artifact_boosts, CharmUnit,
+    find_matching_seeds, find_matching_seeds_all_tiers, load_resalter_artifact_boosts,
+    seed_for_tier, CharmUnit,
 };
 use eframe::egui;
 use egui::Ui;
@@ -10,6 +11,9 @@ use sas2_parser::{SaveData, loot_names};
 
 /// Talisman slots used by GetCharmVal: 7/8 = ring slots, 9 = amulet, 20 = dagger.
 const CHARM_SLOTS: [i32; 4] = [7, 8, 9, 20];
+
+/// Height of the reserved warning area while desired values are being edited.
+const WARN_AREA_HEIGHT: f32 = 64.0;
 
 /// The seed range for a tier: tier * 2000 + 1..=2000.
 fn tier_seed_range(tier: i32) -> (i32, i32) {
@@ -79,7 +83,7 @@ impl SaveEditor {
 
         let mut selected: Option<usize> = self.selected_artifact;
         let mut reroll_requested: Option<usize> = None;
-        let mut reroll_until_requested: Option<usize> = None;
+        let mut search_matches_requested: Option<usize> = None;
 
         // Resalter override info for the impossibility check, loaded once.
         let resalter_boosts = self
@@ -120,6 +124,8 @@ impl SaveEditor {
                             {
                                 if selected != Some(entry.inv_idx) {
                                     self.artifact_search_result = None;
+                                    self.artifact_matches.clear();
+                                    self.artifact_match_picker_open = false;
                                 }
                                 selected = Some(entry.inv_idx);
                             }
@@ -160,6 +166,22 @@ impl SaveEditor {
             ui.separator();
 
             ui.horizontal(|ui| {
+                ui.label("Tier:");
+                let mut tier_edit = tier;
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut tier_edit)
+                            .speed(0.1)
+                            .range(0..=100),
+                    )
+                    .changed()
+                {
+                    if let Some(item) = save.equipment.inventory_items.get_mut(sel_idx) {
+                        let new_seed = seed_for_tier(artifact_seed(item), tier_edit);
+                        item.artifact_seed = new_seed;
+                        item.upgrade = new_seed;
+                    }
+                }
                 ui.label("Seed:");
                 let mut seed_edit = seed;
                 if ui
@@ -182,23 +204,27 @@ impl SaveEditor {
                 {
                     reroll_requested = Some(sel_idx);
                 }
-                // Reroll until desired: searches for all desired values at once.
+                // Find matching artifacts: lists all seeds in the tier (or all tiers with the checkbox) that contain the desired stats.
                 let has_desired = self
                     .artifact_desired_values
                     .values()
                     .any(|d| *d > 0.0);
                 let resp = ui.add_enabled(
                     has_desired,
-                    egui::Button::new("Reroll until desired"),
+                    egui::Button::new("Find matching artifacts"),
                 );
                 if resp
                     .on_hover_text(
-                        "Search seeds in this tier until all desired values match",
+                        "List all artifacts that contain the desired stats, for you to pick from",
                     )
                     .clicked()
                 {
-                    reroll_until_requested = Some(sel_idx);
+                    search_matches_requested = Some(sel_idx);
                 }
+                ui.checkbox(
+                    &mut self.artifact_try_all_tiers,
+                    "Try all tiers",
+                );
             });
             ui.separator();
 
@@ -269,9 +295,8 @@ impl SaveEditor {
             }
             ui.separator();
 
-            // Impossibility warnings and search result. Plain labels sized to
-            // content; no scroll area so wheel events pass through to the
-            // value grid below.
+            // Impossibility warnings and search result.
+            // The area is always reserved with a fixed height so the grid below never shifts, even on the very first drag from 0 (when the warning appears mid-drag and would otherwise move the widget under the cursor and drop the input focus).
             let mut warnings: Vec<String> = Vec::new();
             for (field_id, field_name) in ARTIFACT_FIELDS {
                 let Some(desired) = self.artifact_desired_values.get(field_id).copied() else {
@@ -307,18 +332,23 @@ impl SaveEditor {
                     ));
                 }
             }
-            for warning in &warnings {
-                ui.colored_label(egui::Color32::RED, warning);
-            }
-            // Search result message, kept with the warnings so it is visible
-            // without scrolling the value grid.
-            if let Some((found, message)) = &self.artifact_search_result {
-                if *found {
-                    ui.colored_label(egui::Color32::GREEN, message);
-                } else {
-                    ui.colored_label(egui::Color32::RED, message);
-                }
-            }
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), WARN_AREA_HEIGHT),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    for warning in &warnings {
+                        ui.colored_label(egui::Color32::RED, warning);
+                    }
+                    // Search result message, kept with the warnings so it is visible without scrolling the value grid.
+                    if let Some((found, message)) = &self.artifact_search_result {
+                        if *found {
+                            ui.colored_label(egui::Color32::GREEN, message);
+                        } else {
+                            ui.colored_label(egui::Color32::RED, message);
+                        }
+                    }
+                },
+            );
             ui.separator();
 
             // Value grid
@@ -326,7 +356,7 @@ impl SaveEditor {
                 .auto_shrink([false; 2])
                 .show(ui, |ui| {
                     egui::Grid::new("artifact_values")
-                        .num_columns(4)
+                        .num_columns(5)
                         .spacing([16.0, 4.0])
                         .striped(true)
                         .show(ui, |ui| {
@@ -334,6 +364,7 @@ impl SaveEditor {
                             ui.label(egui::RichText::new("Current").strong());
                             ui.label(egui::RichText::new("Desired").strong());
                             ui.label(egui::RichText::new("Min/Max").strong());
+                            ui.label("");
                             ui.end_row();
 
                             for (field_id, field_name) in ARTIFACT_FIELDS {
@@ -364,7 +395,51 @@ impl SaveEditor {
                                 );
                                 if desired_resp.changed() {
                                     self.artifact_search_result = None;
+                                    self.artifact_matches.clear();
+                                    self.artifact_match_picker_open = false;
                                 }
+
+                                // Per-row QoL buttons, right of the desired input.
+                                let range = effective_value_range(
+                                    subtype,
+                                    tier,
+                                    *field_id,
+                                    resalter_boosts.get(field_id),
+                                );
+                                ui.horizontal(|ui| {
+                                    if let Some((rmin, rmax)) = range {
+                                        if ui
+                                            .small_button("min")
+                                            .on_hover_text("Set desired to the minimum")
+                                            .clicked()
+                                        {
+                                            *desired = rmin;
+                                            self.artifact_search_result = None;
+                                            self.artifact_matches.clear();
+                                            self.artifact_match_picker_open = false;
+                                        }
+                                        if ui
+                                            .small_button("max")
+                                            .on_hover_text("Set desired to the maximum")
+                                            .clicked()
+                                        {
+                                            *desired = rmax;
+                                            self.artifact_search_result = None;
+                                            self.artifact_matches.clear();
+                                            self.artifact_match_picker_open = false;
+                                        }
+                                    }
+                                    if ui
+                                        .small_button("0")
+                                        .on_hover_text("Set desired to 0 (clear)")
+                                        .clicked()
+                                    {
+                                        *desired = 0.0;
+                                        self.artifact_search_result = None;
+                                        self.artifact_matches.clear();
+                                        self.artifact_match_picker_open = false;
+                                    }
+                                });
 
                                 // Min/Max column: Resalter override when present, else vanilla.
                                 let has_resalter = resalter_boosts.contains_key(field_id);
@@ -401,7 +476,7 @@ impl SaveEditor {
                 reroll_seed(item);
             }
         }
-        if let Some(idx) = reroll_until_requested {
+        if let Some(idx) = search_matches_requested {
             let Some(entry) = artifacts.iter().find(|e| e.inv_idx == idx) else {
                 return;
             };
@@ -419,69 +494,184 @@ impl SaveEditor {
                     false,
                     "No desired values set. Set a desired value on a field first.".to_string(),
                 ));
+                self.artifact_matches.clear();
             } else {
-                match find_best_seed_for_values(subtype, tier, &desired, 200_000) {
-                    Some(result) => {
-                        if let Some(item) = save.equipment.inventory_items.get_mut(idx) {
-                            item.artifact_seed = result.seed;
-                            item.upgrade = result.seed;
-                        }
-                        let name_of = |f: i32| -> String {
-                            ARTIFACT_FIELDS
-                                .iter()
-                                .find(|(id, _)| *id == f)
-                                .map(|(_, n)| n.to_string())
-                                .unwrap_or_else(|| format!("field {}", f))
-                        };
-                        if result.missed.is_empty() {
-                            let parts: Vec<String> = desired
-                                .iter()
-                                .map(|(f, d)| format!("{} = {:.1}%", name_of(*f), d))
-                                .collect();
-                            self.artifact_search_result = Some((
-                                true,
-                                format!("Found seed {} with {}", result.seed, parts.join(", ")),
-                            ));
-                        } else {
-                            let matched_parts: Vec<String> = result
-                                .matched
-                                .iter()
-                                .map(|f| name_of(*f))
-                                .collect();
-                            let missed_parts: Vec<String> = result
-                                .missed
-                                .iter()
-                                .map(|(f, want, actual)| {
-                                    format!("{} = {:.1}% (got {:.1}%)", name_of(*f), want, actual)
-                                })
-                                .collect();
-                            let matched_text = if matched_parts.is_empty() {
-                                "nothing".to_string()
-                            } else {
-                                matched_parts.join(", ")
-                            };
-                            self.artifact_search_result = Some((
-                                false,
-                                format!(
-                                    "No exact seed in tier {}; best seed {} matches {}; missed: {}",
-                                    tier,
-                                    result.seed,
-                                    matched_text,
-                                    missed_parts.join(", "),
-                                ),
-                            ));
-                        }
-                    }
-                    None => {
+                // Fields the subtype can never roll are impossible together.
+                let impossible: Vec<String> = desired
+                    .iter()
+                    .filter(|(f, _)| {
+                        effective_value_range(subtype, 40, *f, resalter_boosts.get(f)).is_none()
+                    })
+                    .map(|(f, _)| {
+                        ARTIFACT_FIELDS
+                            .iter()
+                            .find(|(id, _)| id == f)
+                            .map(|(_, n)| n.to_string())
+                            .unwrap_or_else(|| format!("field {}", f))
+                    })
+                    .collect();
+                if !impossible.is_empty() {
+                    self.artifact_search_result = Some((
+                        false,
+                        format!(
+                            "This artifact type (subtype {}) can never roll: {}",
+                            subtype,
+                            impossible.join(", ")
+                        ),
+                    ));
+                    self.artifact_matches.clear();
+                } else if self.artifact_try_all_tiers {
+                    let matches = find_matching_seeds_all_tiers(subtype, 40, &desired);
+                    self.artifact_matches = matches;
+                    if self.artifact_matches.is_empty() {
                         self.artifact_search_result = Some((
                             false,
-                            "No seed found in this tier (searched 200000 seeds).".to_string(),
+                            "No artifact in any tier contains all the desired stats.".to_string(),
                         ));
+                    } else {
+                        self.artifact_search_result = Some((
+                            true,
+                            format!(
+                                "Found {} artifact(s) across all tiers containing the desired stats.",
+                                self.artifact_matches.len()
+                            ),
+                        ));
+                        self.artifact_match_target = Some(idx);
+                        self.artifact_match_search.clear();
+                        self.artifact_match_focus = true;
+                        self.artifact_match_picker_open = true;
+                    }
+                } else {
+                    let matches = find_matching_seeds(subtype, tier, &desired);
+                    self.artifact_matches = matches;
+                    if self.artifact_matches.is_empty() {
+                        self.artifact_search_result = Some((
+                            false,
+                            format!(
+                                "No artifact in tier {} contains all the desired stats.",
+                                tier
+                            ),
+                        ));
+                    } else {
+                        self.artifact_search_result = Some((
+                            true,
+                            format!(
+                                "Found {} artifact(s) in tier {} containing all desired stats.",
+                                self.artifact_matches.len(),
+                                tier
+                            ),
+                        ));
+                        self.artifact_match_target = Some(idx);
+                        self.artifact_match_search.clear();
+                        self.artifact_match_focus = true;
+                        self.artifact_match_picker_open = true;
                     }
                 }
             }
         }
+        // Apply a chosen seed from the match picker (pending state set by the
+        // Apply button click, processed here so the picker window can close).
+        if let Some(new_seed) = self.artifact_pending_apply.take() {
+            if let Some(target) = self.artifact_match_target {
+                if let Some(item) = save.equipment.inventory_items.get_mut(target) {
+                    item.artifact_seed = new_seed;
+                    item.upgrade = new_seed;
+                }
+                self.artifact_match_picker_open = false;
+                self.artifact_match_target = None;
+                self.artifact_search_result = Some((
+                    true,
+                    format!("Applied seed {} to the artifact.", new_seed),
+                ));
+            }
+        }
         self.selected_artifact = selected;
+
+        // Match picker window: list all matching artifacts with their values.
+        if self.artifact_match_picker_open {
+            let mut open = self.artifact_match_picker_open;
+            egui::Window::new("Matching artifacts")
+                .collapsible(false)
+                .resizable(true)
+                .default_width(560.0)
+                .default_height(480.0)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    ui.label("Search seed:");
+                    let resp = ui.text_edit_singleline(&mut self.artifact_match_search);
+                    if self.artifact_match_focus {
+                        resp.request_focus();
+                        self.artifact_match_focus = false;
+                    }
+                    ui.separator();
+                    let needle = self.artifact_match_search.to_lowercase();
+                    let desired: Vec<(i32, f32)> = self
+                        .artifact_desired_values
+                        .iter()
+                        .filter(|(_, d)| **d > 0.0)
+                        .map(|(f, d)| (*f, *d))
+                        .collect();
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            egui::Grid::new("artifact_matches")
+                                .num_columns(desired.len() + 4)
+                                .spacing([12.0, 4.0])
+                                .striped(true)
+                                .show(ui, |ui| {
+                                    ui.label(egui::RichText::new("Seed").strong());
+                                    ui.label(egui::RichText::new("Tier").strong());
+                                    for (f, _) in &desired {
+                                        let name = ARTIFACT_FIELDS
+                                            .iter()
+                                            .find(|(id, _)| id == f)
+                                            .map(|(_, n)| n.to_string())
+                                            .unwrap_or_else(|| format!("field {}", f));
+                                        ui.label(egui::RichText::new(&name).strong());
+                                    }
+                                    ui.label(egui::RichText::new("Closeness").strong());
+                                    ui.label("");
+                                    ui.end_row();
+
+                                    for m in &self.artifact_matches {
+                                        if !needle.is_empty()
+                                            && !m.seed.to_string().contains(&needle)
+                                        {
+                                            continue;
+                                        }
+                                        ui.label(m.seed.to_string());
+                                        ui.label(m.tier.to_string());
+                                        for (f, actual) in &m.values {
+                                            let want = desired
+                                                .iter()
+                                                .find(|(df, _)| df == f)
+                                                .map(|(_, d)| *d)
+                                                .unwrap_or(0.0);
+                                            let diff = (actual - want).abs();
+                                            let text = format!("{:.1}%", actual);
+                                            if diff <= 0.05 {
+                                                ui.colored_label(
+                                                    egui::Color32::LIGHT_GREEN,
+                                                    text,
+                                                );
+                                            } else {
+                                                ui.label(text);
+                                            }
+                                        }
+                                        ui.label(format!("{:.2}", m.error));
+                                        if ui.button("Apply").clicked() {
+                                            if self.artifact_match_target.is_some() {
+                                                self.artifact_pending_apply = Some(m.seed);
+                                            }
+                                        }
+                                        ui.end_row();
+                                    }
+                                });
+                        });
+                });
+            self.artifact_match_picker_open = open;
+        }
 
         ui.add_space(16.0);
         ui.separator();
@@ -493,10 +683,9 @@ impl SaveEditor {
         ui.heading("Equipped Talismans");
         ui.add(
             egui::Label::new(
-                "Charm boosts are computed from the flags of equipped talismans: each flag \
-                 counts how many equipped talismans share it, giving a tier of 1.0 / 1.25 / \
-                 1.35 / 1.4. The effective value is that tier times the flag's vanilla \
-                 magnitude. Nothing here is stored in the save.",
+                "Charm boosts are computed from the flags of equipped talismans: each flag counts how many equipped talismans share it, giving a tier of 1.0 / 1.25 / 1.35 / 1.4. \
+                The effective value is that tier times the flag's vanilla magnitude. \
+                Nothing here is stored in the save.",
             )
             .wrap(),
         );
