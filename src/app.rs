@@ -66,23 +66,31 @@ pub struct SaveEditor {
 
     // Artifacts tab state
     pub selected_artifact: Option<usize>,
-    /// Desired value for the "Find matching artifacts" button, per artifact field.
+    /// Desired value per artifact field, for the "must match" panel (field id -> desired %).
     pub artifact_desired_values: std::collections::HashMap<i32, f32>,
-    /// Result of the last search: (found, message).
-    pub artifact_search_result: Option<(bool, String)>,
-    /// Matching artifact seeds for the current search, sorted best first.
-    pub artifact_matches: Vec<crate::artifact::ArtifactMatch>,
-    /// Inventory index of the artifact the current matches are for.
-    pub artifact_match_target: Option<usize>,
-    /// When true, the match picker window is open.
-    pub artifact_match_picker_open: bool,
-    /// Search text for the match picker.
+    /// Desired value per artifact field, for the "can-match" panel (field id -> desired %).
+    pub artifact_can_values: std::collections::HashMap<i32, f32>,
+    /// Exact matches of the current live search, sorted best first.
+    pub artifact_exact_matches: Vec<crate::artifact::ArtifactMatch>,
+    /// Partial matches of the current live search, sorted best first.
+    pub artifact_partial_matches: Vec<crate::artifact::ArtifactMatch>,
+    /// Search text that filters both match lists by seed.
     pub artifact_match_search: String,
-    /// Focus the match picker search on open.
-    pub artifact_match_focus: bool,
-    /// When true, "Find matching artifacts" searches all tiers instead of the current one.
-    pub artifact_try_all_tiers: bool,
-    /// Pending seed to apply from the match picker, processed next frame.
+    /// When true, the merged result lists also show partial matches.
+    pub artifact_show_partial: bool,
+    /// Sort key of the merged result lists (closeness or a field id).
+    pub artifact_result_sort_key: crate::artifact::ResultSortKey,
+    /// Sort direction of the merged result lists.
+    pub artifact_result_sort_desc: bool,
+    /// Tier scope of the live search.
+    pub artifact_search_scope: crate::artifact::SearchTierScope,
+    /// Minimum tier used when the search scope is MinMax.
+    pub artifact_min_tier: i32,
+    /// Maximum tier used when the search scope is MinMax.
+    pub artifact_max_tier: i32,
+    /// User-raised result cap for the "load more" button; None = the default cap.
+    pub artifact_result_limit: Option<usize>,
+    /// Pending seed to apply to the selected artifact, processed next frame.
     pub artifact_pending_apply: Option<i32>,
 
     // XNB exporter
@@ -112,6 +120,21 @@ pub struct SaveEditor {
 impl SaveEditor {
     /// Construct the app with a pre-loaded config (used by main.rs so window position/state can be applied before the window opens).
     pub fn with_config(config: SaveEditorConfig) -> Self {
+        // Snapshot the remembered artifact search settings before config is moved into the app.
+        let (remember_scope, remember_sort_key, remember_sort_desc) =
+            if config.remember_artifact_search {
+                (
+                    config.artifact_search_scope,
+                    config.artifact_result_sort_key,
+                    config.artifact_result_sort_desc,
+                )
+            } else {
+                (
+                    crate::artifact::SearchTierScope::StaticTier,
+                    crate::artifact::ResultSortKey::Closeness,
+                    false,
+                )
+            };
         let mut app = Self {
             load_requested: false,
             save_data: None,
@@ -150,13 +173,17 @@ impl SaveEditor {
 
             selected_artifact: None,
             artifact_desired_values: std::collections::HashMap::new(),
-            artifact_search_result: None,
-            artifact_matches: Vec::new(),
-            artifact_match_target: None,
-            artifact_match_picker_open: false,
+            artifact_can_values: std::collections::HashMap::new(),
+            artifact_exact_matches: Vec::new(),
+            artifact_partial_matches: Vec::new(),
             artifact_match_search: String::new(),
-            artifact_match_focus: false,
-            artifact_try_all_tiers: false,
+            artifact_show_partial: true,
+            artifact_result_sort_key: remember_sort_key,
+            artifact_result_sort_desc: remember_sort_desc,
+            artifact_search_scope: remember_scope,
+            artifact_min_tier: 0,
+            artifact_max_tier: 40,
+            artifact_result_limit: None,
             artifact_pending_apply: None,
 
             export_tree_loading: false,
@@ -539,6 +566,41 @@ impl SaveEditor {
                         .checkbox(
                             &mut self.config.save_window_state,
                             "Save window state (maximized)",
+                        )
+                        .changed()
+                    {
+                        self.config_save_timer = 0.1;
+                    }
+
+                    ui.separator();
+                    ui.heading("Artifacts");
+                    if ui
+                        .checkbox(
+                            &mut self.config.remember_artifact_search,
+                            "Remember artifact search settings (tier pick, sorting)",
+                        )
+                        .on_hover_text(
+                            "Remember the Tiers: pick and the result sorting options \
+                             across restarts.",
+                        )
+                        .changed()
+                    {
+                        // Persist the current settings immediately when enabling.
+                        if self.config.remember_artifact_search {
+                            self.config.artifact_search_scope = self.artifact_search_scope;
+                            self.config.artifact_result_sort_key = self.artifact_result_sort_key;
+                            self.config.artifact_result_sort_desc = self.artifact_result_sort_desc;
+                        }
+                        self.config_save_timer = 0.1;
+                    }
+                    if ui
+                        .checkbox(
+                            &mut self.config.always_load_all_results,
+                            "Always load all artifact search results",
+                        )
+                        .on_hover_text(
+                            "Show all results instead of only a portion of them; \
+                             can lag with very large result sets.",
                         )
                         .changed()
                     {

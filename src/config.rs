@@ -84,6 +84,26 @@ pub struct SaveEditorConfig {
     /// Last window maximized state.
     #[serde(default)]
     pub window_maximized: bool,
+
+    /// Remember the artifact search settings (tier scope, sort key, sort direction) across restarts.
+    #[serde(default)]
+    pub remember_artifact_search: bool,
+
+    /// Last artifact search tier scope.
+    #[serde(default)]
+    pub artifact_search_scope: crate::artifact::SearchTierScope,
+
+    /// Last artifact result sort key.
+    #[serde(default)]
+    pub artifact_result_sort_key: crate::artifact::ResultSortKey,
+
+    /// Last artifact result sort direction (true = descending).
+    #[serde(default)]
+    pub artifact_result_sort_desc: bool,
+
+    /// Always load all artifact search results, bypassing the load-more cap.
+    #[serde(default)]
+    pub always_load_all_results: bool,
 }
 
 pub fn default_true() -> bool {
@@ -135,6 +155,11 @@ impl Default for SaveEditorConfig {
             window_pos: None,
             window_size: None,
             window_maximized: false,
+            remember_artifact_search: false,
+            artifact_search_scope: crate::artifact::SearchTierScope::StaticTier,
+            artifact_result_sort_key: crate::artifact::ResultSortKey::Closeness,
+            artifact_result_sort_desc: false,
+            always_load_all_results: false,
         }
     }
 }

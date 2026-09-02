@@ -23,23 +23,23 @@ impl DotNetRandom {
     pub fn new(seed: i32) -> Self {
         let mut seed_array = [0i32; 56];
         let num = if seed == i32::MIN { i32::MAX } else { seed.abs() };
-        let mut num2 = Self::MSEED - num;
+        let mut num2 = Self::MSEED.wrapping_sub(num);
         seed_array[55] = num2;
         let mut num3 = 1;
         for i in 1..55 {
             let num4 = (21 * i) % 55;
             seed_array[num4] = num3;
-            num3 = num2 - num3;
+            num3 = num2.wrapping_sub(num3);
             if num3 < 0 {
-                num3 += Self::MBIG;
+                num3 = num3.wrapping_add(Self::MBIG);
             }
             num2 = seed_array[num4];
         }
         for _ in 1..5 {
             for k in 1..56 {
-                seed_array[k] -= seed_array[1 + (k + 30) % 55];
+                seed_array[k] = seed_array[k].wrapping_sub(seed_array[1 + (k + 30) % 55]);
                 if seed_array[k] < 0 {
-                    seed_array[k] += Self::MBIG;
+                    seed_array[k] = seed_array[k].wrapping_add(Self::MBIG);
                 }
             }
         }
@@ -61,12 +61,12 @@ impl DotNetRandom {
         if num2 >= 56 {
             num2 = 1;
         }
-        let mut num3 = self.seed_array[num] - self.seed_array[num2];
+        let mut num3 = self.seed_array[num].wrapping_sub(self.seed_array[num2]);
         if num3 == Self::MBIG {
-            num3 -= 1;
+            num3 = num3.wrapping_sub(1);
         }
         if num3 < 0 {
-            num3 += Self::MBIG;
+            num3 = num3.wrapping_add(Self::MBIG);
         }
         self.seed_array[num] = num3;
         self.inext = num;
@@ -441,11 +441,13 @@ pub fn vanilla_value_range(subtype: i32, tier: i32, field: i32) -> Option<(f32, 
     Some((min, raw_max.min(max)))
 }
 
-/// The effective min/max for a field: the Resalter override when present, otherwise the vanilla range.
-/// Returns None when the field can never be set.
-pub fn effective_value_range(
+/// The achievable range of a field across every tier in `min_tier..=max_tier` (inclusive), for the "is this desired value possible" checks.
+/// A Resalter override is tier-independent and wins over the vanilla ranges.
+/// Returns None when the field can never be nonzero in the tier range.
+pub fn effective_range_union(
     subtype: i32,
-    tier: i32,
+    min_tier: i32,
+    max_tier: i32,
     field: i32,
     resalter: Option<&ArtifactBoostOverride>,
 ) -> Option<(f32, f32)> {
@@ -455,7 +457,20 @@ pub fn effective_value_range(
         }
         return Some((o.min, o.max));
     }
-    vanilla_value_range(subtype, tier, field)
+    let mut min = f32::MAX;
+    let mut max = f32::MIN;
+    for tier in min_tier..=max_tier {
+        let Some((lo, hi)) = vanilla_value_range(subtype, tier, field) else {
+            continue;
+        };
+        min = min.min(lo);
+        max = max.max(hi);
+    }
+    if max < min {
+        None
+    } else {
+        Some((min, max))
+    }
 }
 
 /// A candidate artifact seed whose values contain all the desired fields.
@@ -471,57 +486,151 @@ pub struct ArtifactMatch {
     pub error: f32,
 }
 
-/// Find all seeds in a tier whose artifact has all the desired fields set
-/// (nonzero value), sorted by closeness to the desired values (best first).
-pub fn find_matching_seeds(subtype: i32, tier: i32, desired: &[(i32, f32)]) -> Vec<ArtifactMatch> {
-    if desired.is_empty() {
-        return Vec::new();
-    }
-    let (min, max) = tier_seed_range(tier);
-    let mut matches = Vec::new();
-    for seed in min..=max {
-        let values = compute_artifact_values(seed, subtype, tier);
-        let mut all_present = true;
-        let mut error = 0.0;
-        let mut vals = Vec::with_capacity(desired.len());
-        for (field, want) in desired {
-            let actual = values[*field as usize];
-            if actual <= 0.0 {
-                all_present = false;
-                break;
-            }
-            error += (actual - want).abs();
-            vals.push((*field, actual));
-        }
-        if all_present {
-            matches.push(ArtifactMatch {
-                seed,
-                tier,
-                values: vals,
-                error,
-            });
-        }
-    }
-    matches.sort_by(|a, b| a.error.total_cmp(&b.error));
-    matches
+/// The tier scope for an artifact search: the selected artifact's own tier, an explicit min/max tier range, or every tier.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize, Default)]
+pub enum SearchTierScope {
+    #[default]
+    StaticTier,
+    MinMax,
+    AllTiers,
 }
 
-/// Find all seeds across every tier 0..=max_tier whose artifact has all the
-/// desired fields set, sorted by closeness to the desired values (best first).
-pub fn find_matching_seeds_all_tiers(
-    subtype: i32,
+/// The sort key of the merged result list: closeness or an artifact field.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize, Default)]
+pub enum ResultSortKey {
+    #[default]
+    Closeness,
+    Field(i32),
+}
+
+/// The tier range searched by a scope: (min, max) inclusive.
+pub fn search_tier_range(
+    scope: SearchTierScope,
+    current_tier: i32,
+    min_tier: i32,
     max_tier: i32,
-    desired: &[(i32, f32)],
-) -> Vec<ArtifactMatch> {
-    if desired.is_empty() {
-        return Vec::new();
+) -> (i32, i32) {
+    match scope {
+        SearchTierScope::StaticTier => (current_tier, current_tier),
+        SearchTierScope::MinMax => {
+            let min = min_tier.clamp(0, 40);
+            let max = max_tier.clamp(min, 40);
+            (min, max)
+        }
+        SearchTierScope::AllTiers => (0, 40),
     }
-    let mut matches = Vec::new();
-    for tier in 0..=max_tier {
-        matches.extend(find_matching_seeds(subtype, tier, desired));
+}
+
+/// Collect the (field, desired) pairs from `desired` that are nonzero.
+fn nonzero_desired(desired: &HashMap<i32, f32>) -> Vec<(i32, f32)> {
+    let mut result: Vec<(i32, f32)> = desired
+        .iter()
+        .filter(|(_, d)| **d > 0.0)
+        .map(|(f, d)| (*f, *d))
+        .collect();
+    result.sort_by_key(|(f, _)| *f);
+    result
+}
+
+/// The result of a search: the exact matches and the partial matches.
+pub struct SearchResults {
+    pub exact: Vec<ArtifactMatch>,
+    pub partial: Vec<ArtifactMatch>,
+}
+
+/// Collect the actual values of `fields` that are nonzero on an artifact.
+fn collect_values(values: &[f32; 35], fields: &[i32]) -> Vec<(i32, f32)> {
+    let mut vals = Vec::with_capacity(fields.len());
+    for f in fields {
+        let v = values[*f as usize];
+        if v > 0.0 {
+            vals.push((*f, v));
+        }
     }
-    matches.sort_by(|a, b| a.error.total_cmp(&b.error));
-    matches
+    vals
+}
+
+/// Find the exact and partial matches for the combined must/can filters.
+///
+/// Exact matches: every must field within 0.05 of its desired value, and every can field present (nonzero).
+/// With no must filters set, nothing is exact.
+/// Partial matches: every can field present, excluding seeds already listed as exact matches.
+/// With no can filters set, nothing is partial.
+/// Every match carries the actual values of all filtered fields that are present on the artifact (the union of the must and can fields).
+pub fn find_matches(
+    subtype: i32,
+    min_tier: i32,
+    max_tier: i32,
+    must: &HashMap<i32, f32>,
+    can: &HashMap<i32, f32>,
+) -> SearchResults {
+    let must = nonzero_desired(must);
+    let can = nonzero_desired(can);
+    if must.is_empty() && can.is_empty() {
+        return SearchResults {
+            exact: Vec::new(),
+            partial: Vec::new(),
+        };
+    }
+    // Union of the filter fields, sorted: the display columns of the result list.
+    let mut fields: Vec<i32> = must
+        .iter()
+        .map(|(f, _)| *f)
+        .chain(can.iter().map(|(f, _)| *f))
+        .collect();
+    fields.sort_unstable();
+    fields.dedup();
+    let mut exact = Vec::new();
+    let mut partial = Vec::new();
+    for tier in min_tier..=max_tier {
+        let (min, max) = tier_seed_range(tier);
+        for seed in min..=max {
+            let values = compute_artifact_values(seed, subtype, tier);
+            // Every can field must be present for either list.
+            let mut can_ok = true;
+            let mut can_error = 0.0;
+            for (field, want) in &can {
+                let actual = values[*field as usize];
+                if actual <= 0.0 {
+                    can_ok = false;
+                    break;
+                }
+                can_error += (actual - want).abs();
+            }
+            if !can_ok {
+                continue;
+            }
+            // Must fields, when set, must all be within 0.05 for an exact match.
+            let mut must_ok = true;
+            let mut must_error = 0.0;
+            for (field, want) in &must {
+                let actual = values[*field as usize];
+                if actual <= 0.0 || (actual - want).abs() > 0.05 {
+                    must_ok = false;
+                    break;
+                }
+                must_error += (actual - want).abs();
+            }
+            if !must.is_empty() && must_ok {
+                exact.push(ArtifactMatch {
+                    seed,
+                    tier,
+                    values: collect_values(&values, &fields),
+                    error: must_error,
+                });
+            } else if !can.is_empty() {
+                partial.push(ArtifactMatch {
+                    seed,
+                    tier,
+                    values: collect_values(&values, &fields),
+                    error: can_error,
+                });
+            }
+        }
+    }
+    exact.sort_by(|a, b| a.error.total_cmp(&b.error));
+    partial.sort_by(|a, b| a.error.total_cmp(&b.error));
+    SearchResults { exact, partial }
 }
 
 /// Remap a seed into another tier, preserving the within-tier offset.
@@ -552,6 +661,20 @@ mod tests {
         assert!((rng.next_double() - 0.06674693481379511).abs() < 1e-12);
         let mut rng = DotNetRandom::new(42);
         assert!((rng.next_double() - 0.6681064659115423).abs() < 1e-12);
+    }
+
+    #[test]
+    fn dotnet_random_handles_extreme_seeds() {
+        // Large seeds overflow the internal int arithmetic, the port must wrap like .NET's unchecked math instead of panicking.
+        // Reference values verified with dotnet 10.
+        let mut rng = DotNetRandom::new(i32::MAX);
+        assert!((rng.next_double() - 0.72624326996795985).abs() < 1e-12);
+        let mut rng = DotNetRandom::new(i32::MAX - 1);
+        assert!((rng.next_double() - 0.20381795577882694).abs() < 1e-12);
+        let mut rng = DotNetRandom::new(2_000_000_000);
+        assert!((rng.next_double() - 0.10450909990095957).abs() < 1e-12);
+        let mut rng = DotNetRandom::new(i32::MIN);
+        assert!((rng.next_double() - 0.72624326996795985).abs() < 1e-12);
     }
 
     #[test]
@@ -625,68 +748,147 @@ mod tests {
     }
 
     #[test]
-    fn find_matching_seeds_works() {
-        // Find seeds for attack damage 3% at tier 6 (range 1.75..=4.75).
-        let matches = find_matching_seeds(3, 6, &[(0, 3.0)]);
-        assert!(!matches.is_empty());
-        // All matches must be in the tier range and have the field set.
-        for m in &matches {
+    fn find_matches_must_only_and_can_only() {
+        // Must-only: exact matches require the must fields within 0.05.
+        let must = HashMap::from([(0, 3.0)]);
+        let res = find_matches(3, 6, 6, &must, &HashMap::new());
+        assert!(!res.exact.is_empty());
+        assert!(res.partial.is_empty(), "no can filters -> nothing partial");
+        for m in &res.exact {
+            assert!((12001..=14000).contains(&m.seed));
+            let values = compute_artifact_values(m.seed, 3, 6);
+            assert!((values[0] - 3.0).abs() <= 0.05);
+        }
+        // Sorted by error ascending: the first is the closest to 3.0.
+        assert!(res.exact.first().unwrap().error <= res.exact.last().unwrap().error);
+
+        // Can-only: every can-present seed is a partial match, nothing exact.
+        let can = HashMap::from([(0, 3.0)]);
+        let res = find_matches(3, 6, 6, &HashMap::new(), &can);
+        assert!(res.exact.is_empty(), "no must filters -> nothing exact");
+        assert!(!res.partial.is_empty());
+        for m in &res.partial {
             assert!((12001..=14000).contains(&m.seed));
             let values = compute_artifact_values(m.seed, 3, 6);
             assert!(values[0] > 0.0);
         }
-        // Sorted by error ascending: the first is the closest to 3.0.
-        assert!(matches.first().unwrap().error <= matches.last().unwrap().error);
+        // Sorted by error ascending.
+        assert!(res.partial.first().unwrap().error <= res.partial.last().unwrap().error);
     }
 
     #[test]
-    fn find_matching_seeds_all_present() {
-        // Pick a seed whose artifact has a sub-stat (field 1), then use its
-        // field 1 value as the second desired value. That seed itself has both
-        // fields, so the search must find it.
-        let matches = find_matching_seeds(3, 6, &[(0, 3.0)]);
-        assert!(!matches.is_empty());
-        let seed_a = matches
+    fn find_matches_combined() {
+        // With both filters, a seed matching both is exact; seeds with the can field but not the exact must value are partial, never repeated.
+        let must = HashMap::from([(0, 3.0)]);
+        let res = find_matches(3, 6, 6, &must, &HashMap::new());
+        let seed_a = res
+            .exact
             .iter()
-            .find(|m| {
-                compute_artifact_values(m.seed, 3, 6)[1] > 0.0
-            })
-            .expect("a match with a sub-stat should exist");
-        let seed_a = seed_a.seed;
-        let values_a = compute_artifact_values(seed_a, 3, 6);
-        let v1 = values_a[1];
-        let matches2 = find_matching_seeds(3, 6, &[(0, 3.0), (1, v1)]);
-        assert!(matches2.iter().any(|m| m.seed == seed_a));
-        // Every match has all desired fields present.
-        for m in &matches2 {
+            .find(|m| compute_artifact_values(m.seed, 3, 6)[1] > 0.0)
+            .expect("a match with a sub-stat should exist")
+            .seed;
+        let v1 = compute_artifact_values(seed_a, 3, 6)[1];
+        let must2 = HashMap::from([(1, v1)]);
+        let can = HashMap::from([(0, 3.0)]);
+        let res2 = find_matches(3, 6, 6, &must2, &can);
+        assert!(
+            res2.exact.iter().any(|m| m.seed == seed_a),
+            "a seed matching both filters must be an exact match"
+        );
+        // Every exact match has the can field present and the must field close.
+        for m in &res2.exact {
             let values = compute_artifact_values(m.seed, 3, 6);
-            assert!(values[0] > 0.0 && values[1] > 0.0);
+            assert!(values[0] > 0.0);
+            assert!((values[1] - v1).abs() <= 0.05);
+        }
+        // Seeds with the can field but not the exact must field go to partial.
+        for m in &res2.partial {
+            assert!(
+                !res2.exact.iter().any(|e| e.seed == m.seed),
+                "partial must not repeat exact seeds"
+            );
+            let values = compute_artifact_values(m.seed, 3, 6);
+            assert!(values[0] > 0.0);
+            assert!((values[1] - v1).abs() > 0.05);
         }
     }
 
     #[test]
-    fn find_matching_seeds_all_tiers_works() {
-        // Across all tiers, matches from multiple tiers exist.
-        let matches = find_matching_seeds_all_tiers(3, 40, &[(0, 3.0)]);
-        assert!(!matches.is_empty());
+    fn find_matches_empty_and_impossible() {
+        // Neither filter set: both lists empty.
+        let res = find_matches(3, 6, 6, &HashMap::new(), &HashMap::new());
+        assert!(res.exact.is_empty());
+        assert!(res.partial.is_empty());
+        // An impossible must field (never rollable by the subtype) blocks the
+        // exact list; can-only seeds still appear as partial matches.
+        let can = HashMap::from([(0, 3.0)]);
+        let impossible = HashMap::from([(13, 7.0)]);
+        let res = find_matches(3, 6, 6, &impossible, &can);
+        assert!(res.exact.is_empty());
+        assert!(!res.partial.is_empty());
+        for m in &res.partial {
+            let values = compute_artifact_values(m.seed, 3, 6);
+            assert!(values[0] > 0.0);
+        }
+        // An impossible must field alone yields nothing at all.
+        let res = find_matches(3, 6, 6, &impossible, &HashMap::new());
+        assert!(res.exact.is_empty());
+        assert!(res.partial.is_empty());
+    }
+
+    #[test]
+    fn find_matches_all_tiers_works() {
+        // Across all tiers, can-only partial matches come from many tiers.
+        let can = HashMap::from([(0, 3.0)]);
+        let res = find_matches(3, 0, 40, &HashMap::new(), &can);
+        assert!(res.exact.is_empty());
+        assert!(!res.partial.is_empty());
         // Each match carries its correct tier and seed range.
-        for m in &matches {
+        for m in &res.partial {
             // Seed ranges are tier * 2000 + 1..=tier * 2000 + 2000.
             assert_eq!(m.tier, (m.seed - 1) / 2000);
             assert!(m.tier <= 40);
         }
         // Sorted by error ascending.
-        assert!(matches.first().unwrap().error <= matches.last().unwrap().error);
+        assert!(res.partial.first().unwrap().error <= res.partial.last().unwrap().error);
     }
 
     #[test]
-    fn find_matching_seeds_empty_and_impossible() {
-        // Empty desired list returns nothing.
-        assert!(find_matching_seeds(3, 6, &[]).is_empty());
-        // 100% attack damage is impossible; main stat always set, so matches
-        // still list artifacts (all contain Attack Damage), just far from 100.
-        let matches = find_matching_seeds(3, 6, &[(0, 100.0)]);
-        assert!(!matches.is_empty());
+    fn search_tier_range_scopes() {
+        assert_eq!(search_tier_range(SearchTierScope::StaticTier, 6, 2, 10), (6, 6));
+        assert_eq!(search_tier_range(SearchTierScope::AllTiers, 6, 2, 10), (0, 40));
+        assert_eq!(search_tier_range(SearchTierScope::MinMax, 6, 2, 10), (2, 10));
+        // Min/max are clamped into 0..=40 and min <= max.
+        assert_eq!(search_tier_range(SearchTierScope::MinMax, 6, -5, 99), (0, 40));
+        assert_eq!(search_tier_range(SearchTierScope::MinMax, 6, 12, 7), (12, 12));
+    }
+
+    #[test]
+    fn effective_range_union_spans_tiers() {
+        // Attack damage at tier 6 alone: 1.75..=4.75.
+        let (min, max) = effective_range_union(3, 6, 6, 0, None).unwrap();
+        assert!((min - 1.75).abs() < 0.001);
+        assert!((max - 4.75).abs() < 0.001);
+        // Across tiers 0..=40 the union is wider than any single tier.
+        // Attack main stat maxes at tier 40: 10.25 + 3.0 = 13.25 (cap 20 unreachable).
+        let (min, max) = effective_range_union(3, 0, 40, 0, None).unwrap();
+        assert!((min - 0.25).abs() < 0.001);
+        assert!((max - 13.25).abs() < 0.001);
+        // Sub-stats are unreachable at tier 0 attack.
+        assert!(effective_range_union(3, 0, 0, 1, None).is_none());
+        assert!(effective_range_union(3, 0, 40, 1, None).is_some());
+        // Fields the subtype can never roll are never reachable.
+        assert!(effective_range_union(3, 0, 40, 13, None).is_none());
+        // A Resalter override wins regardless of the tier range.
+        let o = ArtifactBoostOverride {
+            min: 5.0,
+            max: 40.0,
+            static_boost: false,
+            static_value: 5.0,
+        };
+        let (min, max) = effective_range_union(3, 0, 40, 0, Some(&o)).unwrap();
+        assert_eq!(min, 5.0);
+        assert_eq!(max, 40.0);
     }
 
     #[test]
@@ -699,14 +901,14 @@ mod tests {
     }
 
     #[test]
-    fn resalter_override_effective_range() {
+    fn resalter_override_range_union() {
         let o = ArtifactBoostOverride {
             min: 5.0,
             max: 40.0,
             static_boost: false,
             static_value: 5.0,
         };
-        let (min, max) = effective_value_range(3, 6, 0, Some(&o)).unwrap();
+        let (min, max) = effective_range_union(3, 0, 40, 0, Some(&o)).unwrap();
         assert_eq!(min, 5.0);
         assert_eq!(max, 40.0);
         let s = ArtifactBoostOverride {
@@ -715,11 +917,11 @@ mod tests {
             static_boost: true,
             static_value: 25.0,
         };
-        let (min, max) = effective_value_range(3, 6, 0, Some(&s)).unwrap();
+        let (min, max) = effective_range_union(3, 0, 40, 0, Some(&s)).unwrap();
         assert_eq!(min, 25.0);
         assert_eq!(max, 25.0);
-        // Without an override, the vanilla range applies.
-        let (min, max) = effective_value_range(3, 6, 0, None).unwrap();
+        // Without an override, the single-tier union matches the vanilla range.
+        let (min, max) = effective_range_union(3, 6, 6, 0, None).unwrap();
         assert!((min - 1.75).abs() < 0.001);
         assert!((max - 4.75).abs() < 0.001);
     }
