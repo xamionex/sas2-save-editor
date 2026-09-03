@@ -411,6 +411,47 @@ pub fn paint_sel_outline(ui: &egui::Ui, rect: Rect, selected: bool) {
     }
 }
 
+/// Render a set of category checkboxes for the "Remove all by type" pickers.
+/// Up to 9 categories render as a vertical list, more than 9 render in a 3-column grid inside a bounded scroll area, so the window never grows past the screen and stays closable.
+pub fn category_checkboxes(ui: &mut Ui, cats: &[String], checked: &mut HashSet<String>) {
+    if cats.len() > 9 {
+        egui::ScrollArea::vertical()
+            .max_height(300.0)
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                egui::Grid::new("remove_all_cats")
+                    .spacing([16.0, 4.0])
+                    .num_columns(3)
+                    .show(ui, |ui| {
+                        for (i, cat) in cats.iter().enumerate() {
+                            let mut c = checked.contains(cat);
+                            if ui.checkbox(&mut c, cat).changed() {
+                                if c {
+                                    checked.insert(cat.clone());
+                                } else {
+                                    checked.remove(cat);
+                                }
+                            }
+                            if (i + 1) % 3 == 0 {
+                                ui.end_row();
+                            }
+                        }
+                    });
+            });
+    } else {
+        for cat in cats {
+            let mut c = checked.contains(cat);
+            if ui.checkbox(&mut c, cat).changed() {
+                if c {
+                    checked.insert(cat.clone());
+                } else {
+                    checked.remove(cat);
+                }
+            }
+        }
+    }
+}
+
 /// Shared multi-selection help text shown by the "Mouse usage help" button.
 pub const MULTISEL_HELP: &str = "Multi-select:\n\
     \u{2022} Left click: select an item\n\

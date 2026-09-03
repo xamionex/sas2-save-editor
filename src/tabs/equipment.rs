@@ -237,16 +237,11 @@ impl SaveEditor {
                         }
                     }
                     cats.sort();
-                    for cat in &cats {
-                        let mut checked = self.equipment_remove_all_types.contains(cat);
-                        if ui.checkbox(&mut checked, cat).changed() {
-                            if checked {
-                                self.equipment_remove_all_types.insert(cat.clone());
-                            } else {
-                                self.equipment_remove_all_types.remove(cat);
-                            }
-                        }
-                    }
+                    crate::tabs::multisel::category_checkboxes(
+                        ui,
+                        &cats,
+                        &mut self.equipment_remove_all_types,
+                    );
                     ui.separator();
                     if ui
                         .add_enabled(
