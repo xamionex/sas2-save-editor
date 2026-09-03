@@ -124,6 +124,8 @@ pub struct SaveEditor {
     pub artifact_result_limit: Option<usize>,
     /// Pending seed to apply to the selected artifact, processed next frame.
     pub artifact_pending_apply: Option<i32>,
+    /// Pending seed to add as a new artifact item (Add to Inventory), processed next frame.
+    pub artifact_pending_add: Option<i32>,
     /// Cached Resalter artifact_boosts.json contents, keyed by game path.
     pub resalter_boosts_cache: Option<(
         std::path::PathBuf,
@@ -253,6 +255,7 @@ impl SaveEditor {
             artifact_max_tier: 40,
             artifact_result_limit: None,
             artifact_pending_apply: None,
+            artifact_pending_add: None,
             resalter_boosts_cache: None,
 
             export_tree_loading: false,
@@ -615,6 +618,23 @@ impl SaveEditor {
                         }
                         if ui.button("Reset").clicked() {
                             self.config.sidebar_font_size = default_sidebar_font_size();
+                            self.config_save_timer = 0.1;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        if ui
+                            .checkbox(
+                                &mut self.config.group_by_category,
+                                "Group inventory by category",
+                            )
+                            .on_hover_text(
+                                "Group the inventory/stockpile grid by type-subtype. \
+                                 When off, items are shown in one flat grid and Move Left/Right \
+                                 moves across the whole list instead of within a category.",
+                            )
+                            .changed()
+                        {
                             self.config_save_timer = 0.1;
                         }
                     });

@@ -59,6 +59,10 @@ pub struct SaveEditorConfig {
     #[serde(default = "default_upgrade_style")]
     pub artifact_seed_style: crate::tabs::multisel::UpgradeStyle,
 
+    /// Group the inventory/stockpile grid by type-subtype category.
+    #[serde(default = "default_true")]
+    pub group_by_category: bool,
+
     #[serde(default)]
     pub equipment_panel_width: f32,
 
@@ -188,6 +192,7 @@ impl Default for SaveEditorConfig {
             account_for_starstones: false,
             upgrade_style: crate::tabs::multisel::UpgradeStyle::Digits,
             artifact_seed_style: crate::tabs::multisel::UpgradeStyle::Digits,
+            group_by_category: true,
             equipment_panel_width: 0.0,
             add_items_panel_width: 0.0,
             skilltree_panel_width: 0.0,

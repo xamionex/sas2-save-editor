@@ -7,7 +7,7 @@ use crate::artifact::{
 };
 use eframe::egui;
 use egui::Ui;
-use sas2_parser::{SaveData, loot_names};
+use sas2_parser::{Item, SaveData, loot_names};
 use std::collections::HashMap;
 
 /// Talisman slots used by GetCharmVal: 7/8 = ring slots, 9 = amulet, 20 = dagger.
@@ -427,6 +427,7 @@ fn artifact_result_list(
     can: &HashMap<i32, f32>,
     apply_target: Option<usize>,
     pending_apply: &mut Option<i32>,
+    pending_add: &mut Option<i32>,
     limit: &mut Option<usize>,
     always_all: bool,
     max_height: f32,
@@ -702,6 +703,8 @@ fn artifact_result_list(
 
             let apply_w =
                 measure(ui, "Apply", &button_font_id) + 2.0 * ui.spacing().button_padding.x;
+            let add_w = measure(ui, "Add to Inventory", &button_font_id)
+                + 2.0 * ui.spacing().button_padding.x;
             let mut col_widths: Vec<f32> = Vec::with_capacity(num_cols);
             col_widths.push(measure(ui, "Seed", &font_id).max(40.0) + 2.0);
             col_widths.push(measure(ui, "Tier", &font_id) + 2.0);
@@ -709,7 +712,7 @@ fn artifact_result_list(
                 col_widths.push(measure(ui, &field_name(*f), &font_id) + 2.0);
             }
             col_widths.push(measure(ui, "Closeness", &font_id) + 2.0);
-            col_widths.push(apply_w + 2.0);
+            col_widths.push(apply_w + add_w + 2.0 * 2.0);
 
             // Widen columns to fit a sample of the data so cells never overflow their column.
             let sample = laid_out.iter().take(300);
@@ -852,16 +855,31 @@ fn artifact_result_list(
                                             .color(row_color),
                                     ),
                                 );
-                                if ui
-                                    .add_sized(
-                                        [col_widths[num_cols - 1], row_height],
-                                        egui::Button::new("Apply"),
-                                    )
-                                    .clicked()
-                                    && apply_target.is_some()
-                                {
-                                    *pending_apply = Some(m.seed);
-                                }
+                                ui.horizontal(|ui| {
+                                    if ui
+                                        .add_sized(
+                                            [apply_w, row_height],
+                                            egui::Button::new("Apply"),
+                                        )
+                                        .on_hover_text("Set the selected artifact's seed to this")
+                                        .clicked()
+                                        && apply_target.is_some()
+                                    {
+                                        *pending_apply = Some(m.seed);
+                                    }
+                                    if ui
+                                        .add_sized(
+                                            [add_w, row_height],
+                                            egui::Button::new("Add to Inventory"),
+                                        )
+                                        .on_hover_text(
+                                            "Add a new artifact with this seed to the inventory",
+                                        )
+                                        .clicked()
+                                    {
+                                        *pending_add = Some(m.seed);
+                                    }
+                                });
                             }
                         });
                     }
@@ -1151,6 +1169,24 @@ impl SaveEditor {
                     item.artifact_seed = new_seed;
                     item.upgrade = new_seed;
                 }
+                // Add a brand-new artifact with the chosen seed to the inventory.
+                if let Some(new_seed) = self.artifact_pending_add.take() {
+                    let loot_idx = save
+                        .equipment
+                        .inventory_items
+                        .get(sel_idx)
+                        .map(|i| i.loot_idx)
+                        .unwrap_or(0);
+                    save.equipment.inventory_items.push(Item {
+                        loot_idx,
+                        count: 1,
+                        upgrade: new_seed,
+                        stock_piled: false,
+                        artifact_seed: new_seed,
+                        item_version: 0,
+                        rarity: 1,
+                    });
+                }
 
                 let scope_text = match self.artifact_search_scope {
                     SearchTierScope::StaticTier => format!("tier {}", tier),
@@ -1185,6 +1221,7 @@ impl SaveEditor {
                     &self.artifact_can_values,
                     Some(sel_idx),
                     &mut self.artifact_pending_apply,
+                    &mut self.artifact_pending_add,
                     &mut self.artifact_result_limit,
                     self.config.always_load_all_results,
                     ui.available_height().max(120.0),

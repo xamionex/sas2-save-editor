@@ -6,6 +6,29 @@ use egui::{Response, ScrollArea, Ui};
 use sas2_parser::loot_catalog::LootDef;
 use sas2_parser::{Item, SaveData, loot_names};
 
+/// The neighbor of `idx` in the display order, one slot in `dir` (-1 left, +1 right).
+/// When grouping is on, the neighbor is the previous/next item of the same category;
+/// when off, it is the previous/next filtered item in the flat list.
+/// `cat_of` maps an inventory index to its category name ("" when ungrouped).
+fn move_target(
+    filtered: &[usize],
+    cat_of: &std::collections::HashMap<usize, String>,
+    idx: usize,
+    dir: i32,
+) -> Option<usize> {
+    let my_cat = cat_of.get(&idx)?;
+    let pos = filtered.iter().position(|&i| i == idx)?;
+    let mut cursor = pos as i32 + dir;
+    while cursor >= 0 && (cursor as usize) < filtered.len() {
+        let other = filtered[cursor as usize];
+        if cat_of.get(&other) == Some(my_cat) {
+            return Some(other);
+        }
+        cursor += dir;
+    }
+    None
+}
+
 /// Draw one icon button from the atlas.
 /// If either the atlas or the def is missing (or the def has no icon), an invisible placeholder of the same size is rendered so the grid columns stay aligned.
 pub fn draw_image_button(
@@ -341,6 +364,33 @@ impl SaveEditor {
             full_width * 0.5
         };
 
+        // Category of every inventory index ("" when grouping is off), used by the category-aware Move Left/Right in the sidebar.
+        let grouped_mode = self.config.group_by_category;
+        let cat_of: std::collections::HashMap<usize, String> = save
+            .equipment
+            .inventory_items
+            .iter()
+            .enumerate()
+            .map(|(idx, item)| {
+                let cat = if grouped_mode {
+                    self.catalog
+                        .as_ref()
+                        .and_then(|c| c.loot_defs.get(item.loot_idx as usize))
+                        .map(|d| {
+                            format!(
+                                "{} - {}",
+                                loot_names::get_type_name(d.type_),
+                                loot_names::get_subtype_name(d.type_, d.sub_type)
+                            )
+                        })
+                        .unwrap_or_else(|| "Other".to_string())
+                } else {
+                    String::new()
+                };
+                (idx, cat)
+            })
+            .collect();
+
         let right_panel = egui::Panel::right("item_details")
             .resizable(true)
             .default_size(panel_width)
@@ -426,18 +476,59 @@ impl SaveEditor {
                         }
                     }
                     ui.add_space(4.0);
-                    if ui.button("Remove all selected").clicked() {
-                        let mut to_remove = multi.clone();
-                        to_remove.sort_unstable();
-                        to_remove.reverse();
-                        for idx in to_remove {
-                            if idx < save.equipment.inventory_items.len() {
-                                save.equipment.inventory_items.remove(idx);
+                    ui.horizontal(|ui| {
+                        if ui
+                            .button("Move Left")
+                            .on_hover_text("Move the selected items one slot to the left")
+                            .clicked()
+                        {
+                            // Move each selected item to the previous slot in the display order (category-aware when grouping is on).
+                            let mut moved: Vec<usize> = Vec::new();
+                            for &idx in &multi {
+                                if let Some(prev) = move_target(&filtered_indices, &cat_of, idx, -1)
+                                {
+                                    save.equipment.inventory_items.swap(idx, prev);
+                                    moved.push(prev);
+                                }
                             }
+                            self.selected_equipment_items.clear();
+                            for m in moved {
+                                self.selected_equipment_items.insert(m);
+                            }
+                            selected_local = self.selected_equipment_items.iter().next().copied();
                         }
-                        self.selected_equipment_items.clear();
-                        selected_local = None;
-                    }
+                        if ui
+                            .button("Move Right")
+                            .on_hover_text("Move the selected items one slot to the right")
+                            .clicked()
+                        {
+                            let mut moved: Vec<usize> = Vec::new();
+                            for &idx in &multi {
+                                if let Some(next) = move_target(&filtered_indices, &cat_of, idx, 1)
+                                {
+                                    save.equipment.inventory_items.swap(idx, next);
+                                    moved.push(next);
+                                }
+                            }
+                            self.selected_equipment_items.clear();
+                            for m in moved {
+                                self.selected_equipment_items.insert(m);
+                            }
+                            selected_local = self.selected_equipment_items.iter().next().copied();
+                        }
+                        if ui.button("Remove all selected").clicked() {
+                            let mut to_remove = multi.clone();
+                            to_remove.sort_unstable();
+                            to_remove.reverse();
+                            for idx in to_remove {
+                                if idx < save.equipment.inventory_items.len() {
+                                    save.equipment.inventory_items.remove(idx);
+                                }
+                            }
+                            self.selected_equipment_items.clear();
+                            selected_local = None;
+                        }
+                    });
                     ui.separator();
                 }
 
@@ -468,6 +559,37 @@ impl SaveEditor {
                                         let clone = items[orig_idx].clone();
                                         items.push(clone);
                                         selected_local = Some(items.len() - 1);
+                                    }
+                                    if ui
+                                        .button("Move Left")
+                                        .on_hover_text("Move this item one slot to the left")
+                                        .clicked()
+                                    {
+                                        if let Some(prev) =
+                                            move_target(&filtered_indices, &cat_of, orig_idx, -1)
+                                        {
+                                            items.swap(orig_idx, prev);
+                                            selected_local = Some(prev);
+                                            // A plain click also puts the item in the multi set, so follow the move there too.
+                                            if self.selected_equipment_items.remove(&orig_idx) {
+                                                self.selected_equipment_items.insert(prev);
+                                            }
+                                        }
+                                    }
+                                    if ui
+                                        .button("Move Right")
+                                        .on_hover_text("Move this item one slot to the right")
+                                        .clicked()
+                                    {
+                                        if let Some(next) =
+                                            move_target(&filtered_indices, &cat_of, orig_idx, 1)
+                                        {
+                                            items.swap(orig_idx, next);
+                                            selected_local = Some(next);
+                                            if self.selected_equipment_items.remove(&orig_idx) {
+                                                self.selected_equipment_items.insert(next);
+                                            }
+                                        }
                                     }
                                     if ui.button("Remove Item").clicked() {
                                         items.remove(orig_idx);
@@ -505,6 +627,7 @@ impl SaveEditor {
                 .max_height(ui.available_height())
                 .auto_shrink([false; 2])
                 .show_viewport(ui, |ui, viewport| {
+                    let grouped_mode = self.config.group_by_category;
                     let mut grouped: std::collections::HashMap<String, Vec<usize>> =
                         std::collections::HashMap::new();
 
@@ -514,18 +637,22 @@ impl SaveEditor {
                             continue;
                         }
                         let loot_idx = save.equipment.inventory_items[orig_idx].loot_idx;
-                        let cat = self
-                            .catalog
-                            .as_ref()
-                            .and_then(|c| c.loot_defs.get(loot_idx as usize))
-                            .map(|d| {
-                                format!(
-                                    "{} - {}",
-                                    loot_names::get_type_name(d.type_),
-                                    loot_names::get_subtype_name(d.type_, d.sub_type)
-                                )
-                            })
-                            .unwrap_or_else(|| "Other".to_string());
+                        let cat = if grouped_mode {
+                            self.catalog
+                                .as_ref()
+                                .and_then(|c| c.loot_defs.get(loot_idx as usize))
+                                .map(|d| {
+                                    format!(
+                                        "{} - {}",
+                                        loot_names::get_type_name(d.type_),
+                                        loot_names::get_subtype_name(d.type_, d.sub_type)
+                                    )
+                                })
+                                .unwrap_or_else(|| "Other".to_string())
+                        } else {
+                            // Ungrouped: everything lives in one pseudo-category.
+                            String::new()
+                        };
 
                         grouped.entry(cat).or_default().push(orig_idx);
                     }
@@ -533,7 +660,7 @@ impl SaveEditor {
                     let mut categories: Vec<_> = grouped.keys().cloned().collect();
                     categories.sort();
 
-                    // Full display order (all filtered items, not just visible ones) so shift+right-click ranges work across scrolled-out items.
+                    // Full display order (all filtered items, not just visible ones) so shift+click ranges work across scrolled-out items.
                     gsel.display_order.clear();
                     for cat in &categories {
                         for &orig_idx in &grouped[cat] {
@@ -556,11 +683,13 @@ impl SaveEditor {
                         let orig_indices = grouped.get(&cat).unwrap();
 
                         ui.style_mut().interaction.selectable_labels = false;
-                        ui.label(
-                            egui::RichText::new(&cat)
-                                .strong()
-                                .size(self.config.category_font_size),
-                        );
+                        if !cat.is_empty() {
+                            ui.label(
+                                egui::RichText::new(&cat)
+                                    .strong()
+                                    .size(self.config.category_font_size),
+                            );
+                        }
 
                         egui::Grid::new(&cat).spacing([8.0, 8.0]).show(ui, |ui| {
                             let mut x = 0.0f32;
