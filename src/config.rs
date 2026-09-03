@@ -52,11 +52,11 @@ pub struct SaveEditorConfig {
     pub account_for_starstones: bool,
 
     /// How item upgrade levels are shown on grid icons: off, digits, or roman numerals.
-    #[serde(default)]
+    #[serde(default = "default_upgrade_style")]
     pub upgrade_style: crate::tabs::multisel::UpgradeStyle,
 
     /// How artifact seeds are shown on artifact icons: off or digits.
-    #[serde(default)]
+    #[serde(default = "default_upgrade_style")]
     pub artifact_seed_style: crate::tabs::multisel::UpgradeStyle,
 
     #[serde(default)]
@@ -143,6 +143,11 @@ pub struct SaveEditorConfig {
 
 pub fn default_true() -> bool {
     true
+}
+
+/// Default upgrade/seed indicator style: digits.
+pub fn default_upgrade_style() -> crate::tabs::multisel::UpgradeStyle {
+    crate::tabs::multisel::UpgradeStyle::Digits
 }
 
 pub fn default_item_icon_size() -> f32 {

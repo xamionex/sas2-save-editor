@@ -457,10 +457,23 @@ impl SaveEditor {
                             if let Some(def) = def {
                                 self.draw_item_details(ui, &def, &mut items[orig_idx]);
 
-                                if ui.button("Remove Item").clicked() {
-                                    items.remove(orig_idx);
-                                    selected_local = None;
-                                }
+                                ui.horizontal(|ui| {
+                                    if ui
+                                        .button("Clone Item")
+                                        .on_hover_text(
+                                            "Duplicate this item (same count, upgrade and seed)",
+                                        )
+                                        .clicked()
+                                    {
+                                        let clone = items[orig_idx].clone();
+                                        items.push(clone);
+                                        selected_local = Some(items.len() - 1);
+                                    }
+                                    if ui.button("Remove Item").clicked() {
+                                        items.remove(orig_idx);
+                                        selected_local = None;
+                                    }
+                                });
                             } else if self.catalog.is_some() {
                                 ui.label("Item definition not found.");
                             } else {
