@@ -4,6 +4,60 @@ use egui::{Rect, Stroke, Ui, pos2};
 use sas2_parser::SaveData;
 use sas2_parser::skilltree::{SKILL_IMG, SkillTreeCatalog};
 
+/// Skill-tree range: the shortest chain of required skills from `a` to `b`, following parent/child links in both directions (BFS on the undirected graph).
+/// `parents` is an owned copy of the node graph (id -> parents), so the resolver does not borrow the catalog. Falls back to an empty selection if no path exists.
+fn skill_path(parents: &[(usize, [i32; 2])], a: usize, b: usize) -> Vec<usize> {
+    if a == b {
+        return vec![a];
+    }
+    // Undirected adjacency from the parent links (a path may go up or down).
+    let mut adj: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+    for (id, ps) in parents {
+        for &p in ps {
+            if p >= 0 {
+                adj.entry(*id).or_default().push(p as usize);
+                adj.entry(p as usize).or_default().push(*id);
+            }
+        }
+    }
+    // BFS from a to b, tracking predecessors.
+    let mut prev: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    let mut visited: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+    visited.insert(a);
+    queue.push_back(a);
+    while let Some(cur) = queue.pop_front() {
+        if cur == b {
+            break;
+        }
+        if let Some(neighbors) = adj.get(&cur) {
+            for &n in neighbors {
+                if visited.insert(n) {
+                    prev.insert(n, cur);
+                    queue.push_back(n);
+                }
+            }
+        }
+    }
+    if !visited.contains(&b) {
+        return Vec::new();
+    }
+    // Reconstruct b -> ... -> a, then reverse.
+    let mut path = vec![b];
+    let mut cur = b;
+    while cur != a {
+        match prev.get(&cur) {
+            Some(&p) => {
+                path.push(p);
+                cur = p;
+            }
+            None => break,
+        }
+    }
+    path.reverse();
+    path
+}
+
 impl SaveEditor {
     /// Sum of (node.cost * unlock_level) across the entire tree.
     /// Used to check whether the player has spent more points than their level allows.
@@ -49,9 +103,13 @@ impl SaveEditor {
                 self.skilltree_zoom = 0.5;
                 self.skilltree_centered = false; // will re-center next frame
             }
-            ui.label(egui::RichText::new("Shift+Click=Quick +1").weak());
-            ui.label(egui::RichText::new("Right Click=Quick -1").weak());
-            ui.label(egui::RichText::new("Middle Click=Toggle Max").weak());
+            crate::tabs::multisel::mouse_help_button(
+                ui,
+                &["Skill tree:\n\
+                     \u{2022} Shift + Right click: Quick +1\n\
+                     \u{2022} Right click: Quick -1\n\
+                     \u{2022} Middle click: Toggle Max"],
+            );
         });
 
         ui.horizontal(|ui| {
@@ -161,7 +219,7 @@ impl SaveEditor {
         };
 
         // Side panel (node details / class unlocks)
-        let right_panel = egui::Panel::right("item_details")
+        let right_panel = egui::Panel::right("skilltree_details")
             .resizable(true)
             .default_size(panel_width)
             .min_size(min_size)
@@ -170,91 +228,137 @@ impl SaveEditor {
             .show_inside(ui, |ui| {
                 ui.set_min_width(ui.available_width());
 
-                if let Some(id) = self.selected_skill_node {
-                    if let Some(node) = catalog.nodes.get(id) {
-                        ui.heading(&node.titles[0]);
-                        ui.add_space(4.0);
-                        ui.label(&node.descriptions[0]);
-                        ui.separator();
+                // Multi-selection: edit the unlock level of every selected node.
+                let multi: Vec<usize> = self.selected_skill_nodes.iter().copied().collect();
+                if multi.len() > 1 {
+                    ui.heading("Edit Selected Nodes");
+                    ui.label(format!("{} nodes selected", multi.len()));
+                    ui.add_space(4.0);
 
-                        ui.label(format!(
-                            "Type: {}",
-                            node.stat_name().unwrap_or("Weapon/Glyph unlock")
-                        ));
-                        ui.label(format!("Value: {}", node.value));
-                        ui.label(format!("Cost (starstones): {}", node.cost));
-
-                        let mut val = save.stats.tree_unlocks[node.id];
-                        ui.horizontal(|ui| {
-                            ui.label("Unlock level:");
-                            if ui
-                                .add(
-                                    egui::DragValue::new(&mut val)
-                                        .range(0..=node.max_unlock())
-                                        .speed(0.01),
-                                )
-                                .changed()
-                            {
-                                save.stats.tree_unlocks[node.id] = val;
-                                SaveEditor::recalc_player_stats(save, catalog);
-                            }
-                        });
-
-                        ui.add_space(8.0);
-                        ui.label("Parents:");
-                        for &p in &node.parents {
-                            if p >= 0 {
-                                if let Some(parent) = catalog.nodes.get(p as usize) {
-                                    ui.label(format!("- {}", parent.titles[0]));
-                                }
+                    let first_level = save.stats.tree_unlocks.get(multi[0]).copied().unwrap_or(0);
+                    let mut val = first_level;
+                    let mut changed = false;
+                    ui.horizontal(|ui| {
+                        ui.label("Unlock level:");
+                        changed = ui
+                            .add(
+                                egui::DragValue::new(&mut val)
+                                    .range(0..=i32::MAX)
+                                    .speed(0.01),
+                            )
+                            .changed();
+                    });
+                    if changed {
+                        for &id in &multi {
+                            if let Some(entry) = save.stats.tree_unlocks.get_mut(id) {
+                                // Clamp per-node to its max unlock.
+                                let max =
+                                    catalog.nodes.get(id).map(|n| n.max_unlock()).unwrap_or(0);
+                                *entry = val.clamp(0, max);
                             }
                         }
+                        SaveEditor::recalc_player_stats(save, catalog);
+                    }
+                    ui.add_space(4.0);
+                    if ui
+                        .button("Clear selection")
+                        .on_hover_text("Deselect all nodes")
+                        .clicked()
+                    {
+                        self.selected_skill_nodes.clear();
+                        self.selected_skill_node = None;
+                    }
+                    ui.separator();
+                }
 
-                        ui.add_space(8.0);
-                        for (slot, label) in [
-                            (0, "Set as Class Unlock 1"),
-                            (1, "Set as Class Unlock 2"),
-                            (2, "Set as Class Unlock 3"),
-                        ] {
+                // Hide the single-node details while a multi-selection is active so it doesn't give the false impression that edits apply to one node.
+                if multi.len() <= 1 {
+                    if let Some(id) = self.selected_skill_node {
+                        if let Some(node) = catalog.nodes.get(id) {
+                            ui.heading(&node.titles[0]);
+                            ui.add_space(4.0);
+                            ui.label(&node.descriptions[0]);
+                            ui.separator();
+
+                            ui.label(format!(
+                                "Type: {}",
+                                node.stat_name().unwrap_or("Weapon/Glyph unlock")
+                            ));
+                            ui.label(format!("Value: {}", node.value));
+                            ui.label(format!("Cost (starstones): {}", node.cost));
+
+                            let mut val = save.stats.tree_unlocks[node.id];
                             ui.horizontal(|ui| {
-                                if ui.button(label).clicked() {
-                                    save.stats.class_unlocks[slot] = node.id as i32;
-                                    // Slot 3 doesn't trigger recalc in the original code, kept as-is
-                                    if slot < 2 {
-                                        SaveEditor::recalc_player_stats(save, catalog);
+                                ui.label("Unlock level:");
+                                if ui
+                                    .add(
+                                        egui::DragValue::new(&mut val)
+                                            .range(0..=node.max_unlock())
+                                            .speed(0.01),
+                                    )
+                                    .changed()
+                                {
+                                    save.stats.tree_unlocks[node.id] = val;
+                                    SaveEditor::recalc_player_stats(save, catalog);
+                                }
+                            });
+
+                            ui.add_space(8.0);
+                            ui.label("Parents:");
+                            for &p in &node.parents {
+                                if p >= 0 {
+                                    if let Some(parent) = catalog.nodes.get(p as usize) {
+                                        ui.label(format!("- {}", parent.titles[0]));
                                     }
                                 }
-                            });
-                        }
+                            }
 
-                        ui.add_space(8.0);
-                        if ui.button("Close Details").clicked() {
-                            self.selected_skill_node = None;
+                            ui.add_space(8.0);
+                            for (slot, label) in [
+                                (0, "Set as Class Unlock 1"),
+                                (1, "Set as Class Unlock 2"),
+                                (2, "Set as Class Unlock 3"),
+                            ] {
+                                ui.horizontal(|ui| {
+                                    if ui.button(label).clicked() {
+                                        save.stats.class_unlocks[slot] = node.id as i32;
+                                        // Slot 3 doesn't trigger recalc in the original code, kept as-is
+                                        if slot < 2 {
+                                            SaveEditor::recalc_player_stats(save, catalog);
+                                        }
+                                    }
+                                });
+                            }
+
+                            ui.add_space(8.0);
+                            if ui.button("Close Details").clicked() {
+                                self.selected_skill_node = None;
+                            }
                         }
+                    } else {
+                        ui.vertical(|ui| {
+                            ui.add_space(20.0);
+                            ui.label(egui::RichText::new("Select a node to edit").weak());
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new("Class Unlocks (always active)").strong());
+
+                            for i in 0..3 {
+                                let class_id = save.stats.class_unlocks[i];
+                                let name =
+                                    if class_id >= 0 && (class_id as usize) < catalog.nodes.len() {
+                                        catalog.nodes[class_id as usize].titles[0].clone()
+                                    } else {
+                                        "None".to_string()
+                                    };
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("Slot {}: {}", i, name));
+                                    if ui.button("Clear").clicked() {
+                                        save.stats.class_unlocks[i] = -1;
+                                    }
+                                });
+                            }
+                        });
                     }
-                } else {
-                    ui.vertical(|ui| {
-                        ui.add_space(20.0);
-                        ui.label(egui::RichText::new("Select a node to edit").weak());
-                        ui.add_space(8.0);
-                        ui.label(egui::RichText::new("Class Unlocks (always active)").strong());
-
-                        for i in 0..3 {
-                            let class_id = save.stats.class_unlocks[i];
-                            let name = if class_id >= 0 && (class_id as usize) < catalog.nodes.len()
-                            {
-                                catalog.nodes[class_id as usize].titles[0].clone()
-                            } else {
-                                "None".to_string()
-                            };
-                            ui.horizontal(|ui| {
-                                ui.label(format!("Slot {}: {}", i, name));
-                                if ui.button("Clear").clicked() {
-                                    save.stats.class_unlocks[i] = -1;
-                                }
-                            });
-                        }
-                    });
                 }
             });
 
@@ -266,6 +370,21 @@ impl SaveEditor {
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
             let canvas_rect = ui.available_rect_before_wrap();
+
+            // Selection gesture state (click / ctrl+click / shift+click / shift+drag box).
+            let mut gsel = std::mem::take(&mut self.skilltree_grid_sel);
+            gsel.begin(ui);
+            // Full display order of the nodes for shift+click ranges.
+            gsel.display_order.clear();
+            for node in &catalog.nodes {
+                gsel.display_order.push(node.id);
+            }
+            // Shift+click on a tree follows the skill paths between the anchor and the target node (via parent links), instead of a linear shelf range.
+            let parents_owned: Vec<(usize, [i32; 2])> =
+                catalog.nodes.iter().map(|n| (n.id, n.parents)).collect();
+            gsel.range_fn = Some(Box::new(move |anchor: &usize, target: &usize| {
+                skill_path(&parents_owned, *anchor, *target)
+            }));
 
             if self.skilltree_centered {
                 if let Some(prev_rect) = self.prev_canvas_rect {
@@ -303,8 +422,8 @@ impl SaveEditor {
                 self.skilltree_centered = true;
             }
 
-            // Panning
-            if response.dragged() {
+            // Panning (disabled while drawing a selection box)
+            if response.dragged() && !gsel.box_active {
                 self.skilltree_scroll -= response.drag_delta() / self.skilltree_zoom;
             }
 
@@ -394,12 +513,14 @@ impl SaveEditor {
                 );
 
                 let is_selected = self.selected_skill_node == Some(node.id);
+                let is_multi_sel =
+                    self.selected_skill_nodes.contains(&node.id) || gsel.is_box_hit(&node.id);
                 let is_class_unlock = save.stats.class_unlocks.contains(&(node.id as i32));
                 let current_level = save.stats.tree_unlocks[node.id];
                 let max_level = node.max_unlock();
                 let is_max_level = current_level >= max_level;
 
-                let tint = if is_selected {
+                let tint = if is_selected || is_multi_sel {
                     egui::Color32::CYAN
                 } else if is_class_unlock {
                     egui::Color32::from_rgb(255, 200, 50)
@@ -451,11 +572,13 @@ impl SaveEditor {
 
                 painter.image(texture.id(), rect, uv, tint);
 
+                // Register the visible node for the selection box.
+                gsel.cell(rect, node.id);
+
                 // Interaction
                 let node_response = ui.interact(rect, egui::Id::new(node.id), egui::Sense::click());
-                let single_click = node_response.clicked();
                 let middle_click = node_response.middle_clicked();
-                let modifiers = node_response.ctx.input(|i| i.modifiers);
+                let shift_held = node_response.ctx.input(|i| i.modifiers.shift);
 
                 let total_spent = Self::calculate_total_spent_starstones(save, catalog);
                 let level_limit = save.stats.level - 1;
@@ -464,78 +587,95 @@ impl SaveEditor {
                 let starstone_ok =
                     !self.config.account_for_starstones || black_starstone_count >= node.cost;
 
-                // SHIFT+LMB add 1 level (costs node.cost black stones)
-                if single_click && modifiers.shift {
-                    if current_level < max_level && level_ok && starstone_ok {
-                        save.stats.tree_unlocks[node.id] = current_level + 1;
-                        self.stats_dirty = true;
-
-                        if self.config.sync_black_starstones {
-                            Self::adjust_starstone(save, black_idx, -node.cost);
-                        }
-                        if self.config.add_gray_starstones {
-                            Self::adjust_starstone(save, gray_idx, node.cost);
-                        }
-                    }
+                // Quick binds apply to every selected node (or just this one when the multi-selection is empty).
+                let mut targets: Vec<usize> = self.selected_skill_nodes.iter().copied().collect();
+                if targets.is_empty() {
+                    targets.push(node.id);
+                } else if !targets.contains(&node.id) {
+                    targets.push(node.id);
                 }
-                // RMB: remove 1 level (refunds node.cost black stones)
-                else if node_response.secondary_clicked() {
-                    if current_level > 0 {
-                        save.stats.tree_unlocks[node.id] = current_level - 1;
-                        self.stats_dirty = true;
 
-                        if self.config.sync_black_starstones {
-                            Self::adjust_starstone(save, black_idx, node.cost);
-                        }
-                        if self.config.remove_gray_starstones {
-                            Self::adjust_starstone(save, gray_idx, -node.cost);
+                // RMB: quick -1, or quick +1 when shift is held.
+                if node_response.secondary_clicked() {
+                    for &tid in &targets {
+                        let Some(tnode) = catalog.nodes.get(tid) else {
+                            continue;
+                        };
+                        let tlevel = save.stats.tree_unlocks[tid];
+                        let tmax = tnode.max_unlock();
+                        if shift_held {
+                            if tlevel < tmax && level_ok && starstone_ok {
+                                save.stats.tree_unlocks[tid] = tlevel + 1;
+                                self.stats_dirty = true;
+
+                                if self.config.sync_black_starstones {
+                                    Self::adjust_starstone(save, black_idx, -tnode.cost);
+                                }
+                                if self.config.add_gray_starstones {
+                                    Self::adjust_starstone(save, gray_idx, tnode.cost);
+                                }
+                            }
+                        } else if tlevel > 0 {
+                            save.stats.tree_unlocks[tid] = tlevel - 1;
+                            self.stats_dirty = true;
+
+                            if self.config.sync_black_starstones {
+                                Self::adjust_starstone(save, black_idx, tnode.cost);
+                            }
+                            if self.config.remove_gray_starstones {
+                                Self::adjust_starstone(save, gray_idx, -tnode.cost);
+                            }
                         }
                     }
                 }
                 // MMB: toggle between 0 and maximum affordable levels
                 else if middle_click {
-                    if current_level > 0 {
-                        // Downgrade to 0: refund all spent stones
-                        let total_cost = current_level * node.cost;
-                        if self.config.sync_black_starstones {
-                            Self::adjust_starstone(save, black_idx, total_cost);
-                        }
-                        if self.config.remove_gray_starstones {
-                            Self::adjust_starstone(save, gray_idx, -total_cost);
-                        }
-                        save.stats.tree_unlocks[node.id] = 0;
-                        self.stats_dirty = true;
-                    } else {
-                        // Upgrade to as many levels as we can afford (level limit + black stones)
-                        let max_by_level = if self.config.account_for_level {
-                            (level_limit - total_spent).max(0)
-                        } else {
-                            max_level
+                    for &tid in &targets {
+                        let Some(tnode) = catalog.nodes.get(tid) else {
+                            continue;
                         };
-                        let max_by_stones = if self.config.account_for_starstones && node.cost > 0 {
-                            (black_starstone_count / node.cost).min(max_level)
-                        } else {
-                            max_level
-                        };
-                        let points_to_add = max_level.min(max_by_level).min(max_by_stones);
-
-                        if points_to_add > 0 {
-                            let total_cost = points_to_add * node.cost;
-                            save.stats.tree_unlocks[node.id] = points_to_add;
-                            self.stats_dirty = true;
-
+                        let tlevel = save.stats.tree_unlocks[tid];
+                        if tlevel > 0 {
+                            // Downgrade to 0: refund all spent stones
+                            let total_cost = tlevel * tnode.cost;
                             if self.config.sync_black_starstones {
-                                Self::adjust_starstone(save, black_idx, -total_cost);
+                                Self::adjust_starstone(save, black_idx, total_cost);
                             }
-                            if self.config.add_gray_starstones {
-                                Self::adjust_starstone(save, gray_idx, total_cost);
+                            if self.config.remove_gray_starstones {
+                                Self::adjust_starstone(save, gray_idx, -total_cost);
+                            }
+                            save.stats.tree_unlocks[tid] = 0;
+                            self.stats_dirty = true;
+                        } else {
+                            // Upgrade to as many levels as we can afford (level limit + black stones)
+                            let max_by_level = if self.config.account_for_level {
+                                (level_limit - total_spent).max(0)
+                            } else {
+                                tnode.max_unlock()
+                            };
+                            let max_by_stones =
+                                if self.config.account_for_starstones && tnode.cost > 0 {
+                                    (black_starstone_count / tnode.cost).min(tnode.max_unlock())
+                                } else {
+                                    tnode.max_unlock()
+                                };
+                            let points_to_add =
+                                tnode.max_unlock().min(max_by_level).min(max_by_stones);
+
+                            if points_to_add > 0 {
+                                let total_cost = points_to_add * tnode.cost;
+                                save.stats.tree_unlocks[tid] = points_to_add;
+                                self.stats_dirty = true;
+
+                                if self.config.sync_black_starstones {
+                                    Self::adjust_starstone(save, black_idx, -total_cost);
+                                }
+                                if self.config.add_gray_starstones {
+                                    Self::adjust_starstone(save, gray_idx, total_cost);
+                                }
                             }
                         }
                     }
-                }
-                // LMB: select node for details panel
-                else if single_click && !modifiers.any() {
-                    self.selected_skill_node = Some(node.id);
                 }
 
                 // Progress dots for multi-level nodes
@@ -566,6 +706,15 @@ impl SaveEditor {
                     }
                 }
             }
+
+            gsel.update_target();
+            gsel.paint(ui);
+            gsel.end(
+                ui,
+                &mut self.selected_skill_nodes,
+                &mut self.selected_skill_node,
+            );
+            self.skilltree_grid_sel = gsel;
         });
     }
 }

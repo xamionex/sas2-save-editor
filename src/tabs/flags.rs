@@ -52,8 +52,7 @@ impl SaveEditor {
         self.add_ng_level_label(ui, save);
         ui.label("Note: NG level is derived from flags.");
         ui.label(
-            "Flags that preserve across NG cycles: v$t_AREA_NOWHERE, dawnlight_saved, \
-             shroud_saved, blueheart_saved, oath_saved, sheriff_saved, chaos_saved. \
+            "Flags that preserve across NG cycles: v$t_AREA_NOWHERE, dawnlight_saved, shroud_saved, blueheart_saved, oath_saved, sheriff_saved, chaos_saved. \
              The flag $1ntr0 is automatically added if missing.",
         );
     }

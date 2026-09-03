@@ -1,9 +1,9 @@
 use crate::app::SaveEditor;
 use crate::artifact::{
-    ARTIFACT_FIELDS, ArtifactBoostOverride, ArtifactMatch, ResultSortKey, SearchTierScope,
-    artifact_main_field, artifact_rarity, artifact_seed, artifact_tier, charm_effective,
-    charm_unit, charm_vanilla, compute_artifact_values, effective_range_union, find_matches,
-    load_resalter_artifact_boosts, search_tier_range, seed_for_tier, CharmUnit,
+    ARTIFACT_FIELDS, ArtifactBoostOverride, ArtifactMatch, CharmUnit, ResultGroupBy, ResultSortKey,
+    SearchTierScope, artifact_main_field, artifact_rarity, artifact_seed, artifact_tier,
+    charm_effective, charm_unit, charm_vanilla, compute_artifact_values, effective_range_union,
+    find_matches, load_resalter_artifact_boosts, search_tier_range, seed_for_tier,
 };
 use eframe::egui;
 use egui::Ui;
@@ -104,7 +104,11 @@ fn artifact_header(
         // The tier drag is the static tier: it edits the selected artifact and backs the "Static tier" scope.
         let mut tier_edit = tier;
         if ui
-            .add(egui::DragValue::new(&mut tier_edit).speed(0.1).range(0..=100))
+            .add(
+                egui::DragValue::new(&mut tier_edit)
+                    .speed(0.1)
+                    .range(0..=100),
+            )
             .changed()
             && let Some(item) = save.equipment.inventory_items.get_mut(sel_idx)
         {
@@ -112,15 +116,12 @@ fn artifact_header(
             item.artifact_seed = new_seed;
             item.upgrade = new_seed;
         }
+        ui.separator();
         let resp = ui.selectable_value(scope, SearchTierScope::MinMax, "Min/Max");
         if resp.changed() {
             *search_changed = true;
         }
-        let resp = ui.selectable_value(scope, SearchTierScope::AllTiers, "All Tiers");
-        if resp.changed() {
-            *search_changed = true;
-        }
-        // Min/max drags are always visible so the user does not have to switch the scope just to adjust them.
+        // Min/max drags sit right next to the Min/Max scope.
         ui.label("Min:");
         let resp = ui.add(egui::DragValue::new(min_tier).speed(0.1).range(0..=40));
         if resp.changed() {
@@ -128,6 +129,11 @@ fn artifact_header(
         }
         ui.label("Max:");
         let resp = ui.add(egui::DragValue::new(max_tier).speed(0.1).range(0..=40));
+        if resp.changed() {
+            *search_changed = true;
+        }
+        ui.separator();
+        let resp = ui.selectable_value(scope, SearchTierScope::AllTiers, "All Tiers");
         if resp.changed() {
             *search_changed = true;
         }
@@ -360,7 +366,8 @@ fn artifact_editor_panel(
                                         .map(|(min, max)| {
                                             // The search matches within 0.05.
                                             // The min is achievable, but the max is exclusive (NextDouble() < 1.0), so the upper bound needs a tiny epsilon to catch values like 3.30 when the max is 3.25 (the closest achievable value is ~3.25).
-                                            *desired >= min - 0.05 && *desired <= max + 0.05 - 0.0001
+                                            *desired >= min - 0.05
+                                                && *desired <= max + 0.05 - 0.0001
                                         })
                                         .unwrap_or(false);
                                         if !possible {
@@ -371,9 +378,7 @@ fn artifact_editor_panel(
                                                 *field_id,
                                                 resalter_boosts.get(field_id),
                                             )
-                                            .map(|(min, max)| {
-                                                format!("{:.1}-{:.1}%", min, max)
-                                            })
+                                            .map(|(min, max)| format!("{:.1}-{:.1}%", min, max))
                                             .unwrap_or_else(|| "never set".to_string());
                                             ui.colored_label(
                                                 egui::Color32::RED,
@@ -408,8 +413,16 @@ fn artifact_result_list(
     exact: &[ArtifactMatch],
     partial: &[ArtifactMatch],
     show_partial: &mut bool,
+    show_all_stats: &mut bool,
+    subtype: i32,
+    resalter_boosts: &HashMap<i32, ArtifactBoostOverride>,
     sort_key: &mut ResultSortKey,
     sort_desc: &mut bool,
+    sub_sort_key: &mut ResultSortKey,
+    sub_sort_desc: &mut bool,
+    use_sub_sort: &mut bool,
+    group_by: &mut ResultGroupBy,
+    collapsed_groups: &mut std::collections::HashSet<String>,
     must: &HashMap<i32, f32>,
     can: &HashMap<i32, f32>,
     apply_target: Option<usize>,
@@ -420,6 +433,10 @@ fn artifact_result_list(
 ) {
     let key = *sort_key;
     let desc = *sort_desc;
+    let sub_key = *sub_sort_key;
+    let sub_desc = *sub_sort_desc;
+    let use_sub = *use_sub_sort;
+    let grouping = *group_by;
     let needle = match_search.to_lowercase();
     let mut rows: Vec<(&ArtifactMatch, bool)> = exact
         .iter()
@@ -433,40 +450,121 @@ fn artifact_result_list(
         .filter(|(m, _)| needle.is_empty() || m.seed.to_string().contains(&needle))
         .collect();
 
-    let (sort_key_text, key_fn): (String, SortKeyFn) = match key {
-        ResultSortKey::Closeness => ("Closeness".to_string(), Box::new(|m| m.error)),
-        ResultSortKey::Field(f) => (
-            field_name(f),
-            Box::new(move |m: &ArtifactMatch| {
+    let sort_fn = |k: ResultSortKey| -> SortKeyFn {
+        match k {
+            ResultSortKey::Closeness => Box::new(|m: &ArtifactMatch| m.error),
+            ResultSortKey::Tier => Box::new(|m: &ArtifactMatch| m.tier as f32),
+            ResultSortKey::Field(f) => Box::new(move |m: &ArtifactMatch| {
                 m.values
                     .iter()
                     .find(|(field, _)| *field == f)
                     .map(|(_, v)| *v)
                     .unwrap_or(0.0)
             }),
-        ),
+        }
     };
-    if desc {
-        rows.sort_by(|a, b| {
-            key_fn(b.0)
-                .total_cmp(&key_fn(a.0))
-                .then(b.0.seed.cmp(&a.0.seed))
-        });
+    let key_fn = sort_fn(key);
+    let sub_fn = sort_fn(sub_key);
+    let (sort_key_text, sub_sort_key_text): (String, String) = (
+        match key {
+            ResultSortKey::Closeness => "Closeness".to_string(),
+            ResultSortKey::Tier => "Tier".to_string(),
+            ResultSortKey::Field(f) => field_name(f),
+        },
+        match sub_key {
+            ResultSortKey::Closeness => "Closeness".to_string(),
+            ResultSortKey::Tier => "Tier".to_string(),
+            ResultSortKey::Field(f) => field_name(f),
+        },
+    );
+    let cmp = |a: &ArtifactMatch, b: &ArtifactMatch| -> std::cmp::Ordering {
+        let primary = if desc {
+            key_fn(b).total_cmp(&key_fn(a))
+        } else {
+            key_fn(a).total_cmp(&key_fn(b))
+        };
+        if primary != std::cmp::Ordering::Equal {
+            return primary;
+        }
+        if use_sub {
+            let secondary = if sub_desc {
+                sub_fn(b).total_cmp(&sub_fn(a))
+            } else {
+                sub_fn(a).total_cmp(&sub_fn(b))
+            };
+            if secondary != std::cmp::Ordering::Equal {
+                return secondary;
+            }
+        }
+        a.seed.cmp(&b.seed)
+    };
+    rows.sort_by(|a, b| cmp(a.0, b.0));
+
+    // Grouping: rows are laid out as (group header | data row) entries.
+    // A group header is a full-width row that spans all columns.
+    enum RowKind<'a> {
+        Data(&'a ArtifactMatch, bool),
+        GroupHeader(String),
+    }
+    let group_value = |m: &ArtifactMatch| -> Option<String> {
+        match grouping {
+            ResultGroupBy::None => None,
+            ResultGroupBy::Tier => Some(format!("Tier {}", m.tier)),
+            ResultGroupBy::Field(f) => {
+                let v = m
+                    .values
+                    .iter()
+                    .find(|(field, _)| *field == f)
+                    .map(|(_, v)| *v)
+                    .unwrap_or(0.0);
+                if v > 0.0 {
+                    Some(format!("{}: {:.1}%", field_name(f), v))
+                } else {
+                    Some(format!("{}: -", field_name(f)))
+                }
+            }
+        }
+    };
+    let mut laid_out: Vec<RowKind> = Vec::with_capacity(rows.len() + 8);
+    if grouping != ResultGroupBy::None {
+        let mut last_group: Option<String> = None;
+        for (m, is_exact) in &rows {
+            let g = group_value(m);
+            if g != last_group {
+                if let Some(g) = g.clone() {
+                    laid_out.push(RowKind::GroupHeader(g));
+                }
+                last_group = g;
+            }
+            // Collapsed groups only show their header row.
+            if let Some(g) = &last_group
+                && collapsed_groups.contains(g)
+            {
+                continue;
+            }
+            laid_out.push(RowKind::Data(m, *is_exact));
+        }
     } else {
-        rows.sort_by(|a, b| {
-            key_fn(a.0)
-                .total_cmp(&key_fn(b.0))
-                .then(a.0.seed.cmp(&b.0.seed))
-        });
+        for (m, is_exact) in &rows {
+            laid_out.push(RowKind::Data(m, *is_exact));
+        }
     }
 
     // Union of the filtered fields, sorted: the display columns.
-    let mut fields: Vec<i32> = must
-        .iter()
-        .chain(can.iter())
-        .filter(|(_, v)| **v > 0.0)
-        .map(|(f, _)| *f)
-        .collect();
+    // When "Show all stats" is on, every artifact field becomes a column instead, except fields the subtype can never roll (across any tier, and not enabled by a Resalter override).
+    let mut fields: Vec<i32> = if *show_all_stats {
+        ARTIFACT_FIELDS
+            .iter()
+            .map(|(f, _)| *f)
+            .filter(|f| effective_range_union(subtype, 0, 40, *f, resalter_boosts.get(f)).is_some())
+            .collect()
+    } else {
+        must.iter()
+            .chain(can.iter())
+            .filter(|(_, v)| **v > 0.0)
+            .map(|(f, _)| *f)
+            .collect()
+    };
     fields.sort_unstable();
     fields.dedup();
 
@@ -491,14 +589,24 @@ fn artifact_result_list(
     } else {
         total
     };
+    // The number of laid-out rows: data rows up to `shown`, plus the group headers that precede them.
+    let mut shown_rows = 0usize;
+    let mut data_seen = 0usize;
+    for r in &laid_out {
+        if let RowKind::Data(_, _) = r {
+            if data_seen >= shown {
+                break;
+            }
+            data_seen += 1;
+        }
+        shown_rows += 1;
+    }
 
     egui::Frame::group(ui.style())
         .inner_margin(egui::Margin::symmetric(8, 6))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(format!("{} ({})", title, scope_text)).strong(),
-                );
+                ui.label(egui::RichText::new(format!("{} ({})", title, scope_text)).strong());
                 if rows.is_empty() {
                     ui.label(egui::RichText::new("No matches.").weak());
                 } else if capped {
@@ -509,11 +617,15 @@ fn artifact_result_list(
             });
             ui.horizontal(|ui| {
                 ui.checkbox(show_partial, "Show partial matches");
+                ui.checkbox(show_all_stats, "Show all stats")
+                    .on_hover_text("Show every artifact stat column, not only the filtered ones");
+                ui.separator();
                 ui.label("Sort by:");
                 egui::ComboBox::from_id_salt(format!("{}_sort", grid_id))
                     .selected_text(&sort_key_text)
                     .show_ui(ui, |ui| {
                         ui.selectable_value(sort_key, ResultSortKey::Closeness, "Closeness");
+                        ui.selectable_value(sort_key, ResultSortKey::Tier, "Tier");
                         for f in &fields {
                             let name = field_name(*f);
                             ui.selectable_value(sort_key, ResultSortKey::Field(*f), name);
@@ -521,6 +633,44 @@ fn artifact_result_list(
                     });
                 ui.selectable_value(sort_desc, true, "Desc");
                 ui.selectable_value(sort_desc, false, "Asc");
+                ui.separator();
+                ui.checkbox(use_sub_sort, "Sub Sort");
+                if *use_sub_sort {
+                    ui.label("Then by:");
+                    egui::ComboBox::from_id_salt(format!("{}_sub_sort", grid_id))
+                        .selected_text(&sub_sort_key_text)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                sub_sort_key,
+                                ResultSortKey::Closeness,
+                                "Closeness",
+                            );
+                            ui.selectable_value(sub_sort_key, ResultSortKey::Tier, "Tier");
+                            for f in &fields {
+                                let name = field_name(*f);
+                                ui.selectable_value(sub_sort_key, ResultSortKey::Field(*f), name);
+                            }
+                        });
+                    ui.selectable_value(sub_sort_desc, true, "Desc");
+                    ui.selectable_value(sub_sort_desc, false, "Asc");
+                }
+                ui.separator();
+                ui.label("Group by:");
+                let group_text = match grouping {
+                    ResultGroupBy::None => "None".to_string(),
+                    ResultGroupBy::Tier => "Tier".to_string(),
+                    ResultGroupBy::Field(f) => field_name(f),
+                };
+                egui::ComboBox::from_id_salt(format!("{}_group", grid_id))
+                    .selected_text(&group_text)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(group_by, ResultGroupBy::None, "None");
+                        ui.selectable_value(group_by, ResultGroupBy::Tier, "Tier");
+                        for f in &fields {
+                            let name = field_name(*f);
+                            ui.selectable_value(group_by, ResultGroupBy::Field(*f), name);
+                        }
+                    });
                 if capped {
                     if ui.button("Show less").clicked() {
                         *limit = Some(shown / 2);
@@ -532,34 +682,151 @@ fn artifact_result_list(
             });
             ui.separator();
 
+            // Fixed-width table: header and body use the exact same per-column widths, so the words always line up with the numbers no matter how much the user scrolls.
+            // The widths are measured from the header labels and a sample of the data, so the table can be wider than the viewport and get a horizontal scrollbar.
+            let num_cols = fields.len() + 4;
+            let font_id = egui::TextStyle::Body.resolve(ui.style());
+            let button_font_id = egui::TextStyle::Button.resolve(ui.style());
+            let text_height = ui.text_style_height(&egui::TextStyle::Body);
+            let button_height = (text_height + 2.0 * ui.spacing().button_padding.y)
+                .max(ui.spacing().interact_size.y);
+            let row_height = text_height.max(button_height);
+            let x_spacing = 12.0;
+            let measure = |ui: &Ui, text: &str, font: &egui::FontId| -> f32 {
+                ui.fonts_mut(|f| {
+                    f.layout_no_wrap(text.to_string(), font.clone(), egui::Color32::PLACEHOLDER)
+                        .size()
+                        .x
+                })
+            };
+
+            let apply_w =
+                measure(ui, "Apply", &button_font_id) + 2.0 * ui.spacing().button_padding.x;
+            let mut col_widths: Vec<f32> = Vec::with_capacity(num_cols);
+            col_widths.push(measure(ui, "Seed", &font_id).max(40.0) + 2.0);
+            col_widths.push(measure(ui, "Tier", &font_id) + 2.0);
+            for f in &fields {
+                col_widths.push(measure(ui, &field_name(*f), &font_id) + 2.0);
+            }
+            col_widths.push(measure(ui, "Closeness", &font_id) + 2.0);
+            col_widths.push(apply_w + 2.0);
+
+            // Widen columns to fit a sample of the data so cells never overflow their column.
+            let sample = laid_out.iter().take(300);
+            for row_kind in sample {
+                if let RowKind::Data(m, _) = row_kind {
+                    col_widths[0] =
+                        col_widths[0].max(measure(ui, &m.seed.to_string(), &font_id) + 2.0);
+                    col_widths[1] =
+                        col_widths[1].max(measure(ui, &m.tier.to_string(), &font_id) + 2.0);
+                    for (i, f) in fields.iter().enumerate() {
+                        let actual = m
+                            .values
+                            .iter()
+                            .find(|(field, _)| field == f)
+                            .map(|(_, v)| *v)
+                            .unwrap_or(0.0);
+                        let text = if actual > 0.0 {
+                            format!("{:.1}%", actual)
+                        } else {
+                            "-".to_string()
+                        };
+                        col_widths[2 + i] =
+                            col_widths[2 + i].max(measure(ui, &text, &font_id) + 2.0);
+                    }
+                    let closeness = format!("{:.2}", m.error);
+                    col_widths[num_cols - 2] =
+                        col_widths[num_cols - 2].max(measure(ui, &closeness, &font_id) + 2.0);
+                }
+            }
+            let total_width: f32 =
+                col_widths.iter().sum::<f32>() + x_spacing * (num_cols as f32 - 1.0);
+
+            // Pinned header: its own horizontal scroll area, synced to the body's horizontal offset each frame.
+            // The body ScrollArea derives its id from an ID salt, so the lookup must use the same ID, not a String.
+            let body_scroll_id =
+                ui.make_persistent_id(egui::Id::new(format!("{}_scroll", grid_id)));
+            let body_offset_x =
+                egui::containers::scroll_area::State::load(ui.ctx(), body_scroll_id)
+                    .map(|s| s.offset.x)
+                    .unwrap_or(0.0);
+            egui::ScrollArea::horizontal()
+                .id_salt(format!("{}_hdr_scroll", grid_id))
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .horizontal_scroll_offset(body_offset_x)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.add_sized(
+                            [col_widths[0], row_height],
+                            egui::Label::new(egui::RichText::new("Seed").strong()),
+                        );
+                        ui.add_sized(
+                            [col_widths[1], row_height],
+                            egui::Label::new(egui::RichText::new("Tier").strong()),
+                        );
+                        for (i, f) in fields.iter().enumerate() {
+                            ui.add_sized(
+                                [col_widths[2 + i], row_height],
+                                egui::Label::new(egui::RichText::new(field_name(*f)).strong()),
+                            );
+                        }
+                        ui.add_sized(
+                            [col_widths[num_cols - 2], row_height],
+                            egui::Label::new(egui::RichText::new("Closeness").strong()),
+                        );
+                        ui.add_sized([col_widths[num_cols - 1], row_height], egui::Label::new(""));
+                    });
+                });
+            ui.add_space(2.0);
+
+            // Virtualized rows: only the rows visible in the scroll viewport are laid out each frame.
+            // With 1k+ results this is the difference between a handful of widgets and thousands per frame.
+            let total_rows = shown_rows;
+
             egui::ScrollArea::both()
                 .id_salt(format!("{}_scroll", grid_id))
                 .max_height(max_height)
                 .auto_shrink([false; 2])
-                .show(ui, |ui| {
-                    egui::Grid::new(grid_id)
-                        .num_columns(fields.len() + 4)
-                        .spacing([12.0, 4.0])
-                        .striped(true)
-                        .show(ui, |ui| {
-                            ui.label(egui::RichText::new("Seed").strong());
-                            ui.label(egui::RichText::new("Tier").strong());
-                            for f in &fields {
-                                ui.label(egui::RichText::new(field_name(*f)).strong());
+                .show_rows(ui, row_height, total_rows, |ui, row_range| {
+                    for row in row_range {
+                        ui.horizontal(|ui| match &laid_out[row] {
+                            RowKind::GroupHeader(text) => {
+                                let collapsed = collapsed_groups.contains(text);
+                                let arrow = if collapsed { "▶" } else { "▼" };
+                                let resp = ui.add_sized(
+                                    [total_width, row_height],
+                                    egui::Button::selectable(
+                                        collapsed,
+                                        egui::RichText::new(format!("{} {}", arrow, text)).strong(),
+                                    ),
+                                );
+                                if resp.clicked() {
+                                    if collapsed {
+                                        collapsed_groups.remove(text);
+                                    } else {
+                                        collapsed_groups.insert(text.clone());
+                                    }
+                                }
                             }
-                            ui.label(egui::RichText::new("Closeness").strong());
-                            ui.label("");
-                            ui.end_row();
-
-                            for (m, is_exact) in rows.iter().take(shown) {
+                            RowKind::Data(m, is_exact) => {
                                 let row_color = if *is_exact {
                                     egui::Color32::GOLD
                                 } else {
                                     egui::Color32::LIGHT_GREEN
                                 };
-                                ui.colored_label(row_color, m.seed.to_string());
-                                ui.colored_label(row_color, m.tier.to_string());
-                                for f in &fields {
+                                ui.add_sized(
+                                    [col_widths[0], row_height],
+                                    egui::Label::new(
+                                        egui::RichText::new(m.seed.to_string()).color(row_color),
+                                    ),
+                                );
+                                ui.add_sized(
+                                    [col_widths[1], row_height],
+                                    egui::Label::new(
+                                        egui::RichText::new(m.tier.to_string()).color(row_color),
+                                    ),
+                                );
+                                for (i, f) in fields.iter().enumerate() {
                                     let actual = m
                                         .values
                                         .iter()
@@ -571,17 +838,33 @@ fn artifact_result_list(
                                     } else {
                                         "-".to_string()
                                     };
-                                    ui.colored_label(row_color, text);
+                                    ui.add_sized(
+                                        [col_widths[2 + i], row_height],
+                                        egui::Label::new(
+                                            egui::RichText::new(text).color(row_color),
+                                        ),
+                                    );
                                 }
-                                ui.colored_label(row_color, format!("{:.2}", m.error));
-                                if ui.button("Apply").clicked()
+                                ui.add_sized(
+                                    [col_widths[num_cols - 2], row_height],
+                                    egui::Label::new(
+                                        egui::RichText::new(format!("{:.2}", m.error))
+                                            .color(row_color),
+                                    ),
+                                );
+                                if ui
+                                    .add_sized(
+                                        [col_widths[num_cols - 1], row_height],
+                                        egui::Button::new("Apply"),
+                                    )
+                                    .clicked()
                                     && apply_target.is_some()
                                 {
                                     *pending_apply = Some(m.seed);
                                 }
-                                ui.end_row();
                             }
                         });
+                    }
                 });
         });
 }
@@ -590,8 +873,9 @@ impl SaveEditor {
     pub fn show_artifacts_ui(&mut self, ui: &mut Ui, save: &mut SaveData) {
         ui.add(
             egui::Label::new(
-                "Artifact values are not stored in the save: the game rolls them from a seed on load. Edit the seed or reroll it to change the values. \
-                 Talisman boosts come from the equipped talismans' flags, shown below for reference.",
+                "Artifact values are not stored in the save: the game rolls them from a seed on load. \
+                Edit the seed or reroll it to change the values. \
+                Talisman boosts come from the equipped talismans' flags, shown below for reference.",
             )
             .wrap(),
         );
@@ -627,20 +911,20 @@ impl SaveEditor {
         let mut selected: Option<usize> = self.selected_artifact;
         let mut selected_changed = false;
 
-        // Resalter override info for the impossibility check, loaded once.
-        let resalter_boosts = self
-            .config
-            .game_path
-            .as_deref()
-            .map(load_resalter_artifact_boosts)
-            .unwrap_or_default();
+        // Resalter override info for the impossibility check, loaded once per game path.
+        let resalter_boosts = self.resalter_boosts_cache();
         let drag_sensitivity = self.config.drag_value_sensitivity;
 
-        // Left panel: artifact list
-        egui::Panel::left("artifact_list")
+        // Left panel: artifact list, 30% narrower than before.
+        let list_width = if self.config.artifact_list_width > 0.0 {
+            self.config.artifact_list_width.max(120.0)
+        } else {
+            196.0
+        };
+        let left_panel = egui::Panel::left("artifact_list")
             .resizable(true)
-            .default_size(280.0)
-            .min_size(180.0)
+            .default_size(list_width)
+            .min_size(120.0)
             .frame(egui::Frame::NONE)
             .show_inside(ui, |ui| {
                 ui.label(egui::RichText::new("Artifacts").strong());
@@ -667,6 +951,14 @@ impl SaveEditor {
                             {
                                 if selected != Some(entry.inv_idx) {
                                     selected_changed = true;
+                                    // A different artifact means a different search: reset the sort to closeness.
+                                    self.artifact_result_sort_key = ResultSortKey::Closeness;
+                                    self.artifact_result_sort_desc = false;
+                                    self.artifact_result_sub_sort_key = ResultSortKey::Closeness;
+                                    self.artifact_result_sub_sort_desc = false;
+                                    self.artifact_use_sub_sort = false;
+                                    self.artifact_result_group_by = ResultGroupBy::None;
+                                    self.artifact_collapsed_groups.clear();
                                 }
                                 selected = Some(entry.inv_idx);
                             }
@@ -674,103 +966,25 @@ impl SaveEditor {
                     });
             });
 
-        // Central panel: search grid
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            let Some(sel_idx) = selected else {
-                ui.label("Select an artifact.");
-                return;
-            };
-            let Some(entry) = artifacts.iter().find(|e| e.inv_idx == sel_idx) else {
-                ui.label("Selected artifact not found.");
-                return;
-            };
+        // Save the left panel width when resized.
+        let actual_width = left_panel.response.rect.width();
+        if (actual_width - self.config.artifact_list_width).abs() > 0.1 {
+            self.config.artifact_list_width = actual_width;
+            self.config_save_timer = 0.5;
+        }
+
+        // Selection data, shared by the right sidebar and the central panel.
+        let sel_idx = selected;
+        let selection = sel_idx.and_then(|i| artifacts.iter().find(|e| e.inv_idx == i));
+
+        if let Some(entry) = selection {
+            let sel_idx = entry.inv_idx;
             let seed = entry.seed;
             let subtype = entry.subtype;
             let tier = artifact_tier(seed);
             let values = compute_artifact_values(seed, subtype, tier);
             let subtype_name = loot_names::get_subtype_name(6, subtype);
-
             let mut search_changed = selected_changed;
-
-            ui.heading(&entry.name);
-            ui.label(format!("Type: Charm - {}", subtype_name));
-            ui.label(format!(
-                "Rarity: {}",
-                match artifact_rarity(&values) {
-                    0 => "Common".to_string(),
-                    1 => "Rare".to_string(),
-                    2 => "Very Rare".to_string(),
-                    3 => "Legendary".to_string(),
-                    _ => "Epic".to_string(),
-                }
-            ));
-            ui.separator();
-
-            artifact_header(
-                ui,
-                &mut self.artifact_match_search,
-                &mut self.artifact_search_scope,
-                &mut self.artifact_min_tier,
-                &mut self.artifact_max_tier,
-                drag_sensitivity,
-                tier,
-                seed,
-                sel_idx,
-                save,
-                &mut search_changed,
-            );
-            // Remember the tier scope and sort settings when the config option is enabled.
-            if self.config.remember_artifact_search {
-                let changed = self.config.artifact_search_scope != self.artifact_search_scope
-                    || self.config.artifact_result_sort_key != self.artifact_result_sort_key
-                    || self.config.artifact_result_sort_desc != self.artifact_result_sort_desc;
-                self.config.artifact_search_scope = self.artifact_search_scope;
-                self.config.artifact_result_sort_key = self.artifact_result_sort_key;
-                self.config.artifact_result_sort_desc = self.artifact_result_sort_desc;
-                if changed {
-                    self.config_save_timer = 0.1;
-                }
-            }
-            ui.separator();
-
-            // The header can change the seed (tier/seed drags, reroll). Re-read it and the tier so the search follows the new seed/tier.
-            let seed = save
-                .equipment
-                .inventory_items
-                .get(sel_idx)
-                .map(artifact_seed)
-                .unwrap_or(seed);
-            let tier = artifact_tier(seed);
-            if seed != entry.seed {
-                search_changed = true;
-            }
-            let values = compute_artifact_values(seed, subtype, tier);
-
-            // Live search: recompute both match lists whenever a setting changed.
-            if search_changed {
-                recompute_matches(
-                    &mut self.artifact_exact_matches,
-                    &mut self.artifact_partial_matches,
-                    &self.artifact_desired_values,
-                    &self.artifact_can_values,
-                    subtype,
-                    self.artifact_search_scope,
-                    tier,
-                    self.artifact_min_tier,
-                    self.artifact_max_tier,
-                );
-                // A new result set starts at the size-based cap again.
-                self.artifact_result_limit = None;
-                search_changed = false;
-            }
-
-            // Apply a chosen seed from a match list (pending state set by the Apply button click, processed here so the lists can update).
-            if let Some(new_seed) = self.artifact_pending_apply.take()
-                && let Some(item) = save.equipment.inventory_items.get_mut(sel_idx)
-            {
-                item.artifact_seed = new_seed;
-                item.upgrade = new_seed;
-            }
 
             // The tier range the current search scope covers, used by the editor panels for possibility checks and min/max buttons.
             let (search_min_tier, search_max_tier) = search_tier_range(
@@ -780,175 +994,249 @@ impl SaveEditor {
                 self.artifact_max_tier,
             );
 
-            let scope_text = match self.artifact_search_scope {
-                SearchTierScope::StaticTier => format!("tier {}", tier),
-                SearchTierScope::MinMax => format!(
-                    "tiers {}-{}",
-                    self.artifact_min_tier, self.artifact_max_tier
-                ),
-                SearchTierScope::AllTiers => "all tiers".to_string(),
-            };
-
-            // Responsive layout: the merged results list on the left, the two editor panels on the right when wide enough, stacked otherwise.
-            // Each editor panel is allocated exactly half the column (minus the 8px gap), so the two boxes always have the same height.
-            // The scroll area inside a panel fills whatever its header leaves.
-            let min_column_width = 420.0;
-            // Each box gets half the column minus the gap, then 1px less per box and 1px less gap, so the column's own item spacing never pushes the total over and the outer scroll bar stays hidden.
-            let panel_total = ((ui.available_height() - 10.0) / 2.0).max(120.0);
-            if ui.available_width() >= min_column_width * 2.0 {
-                ui.columns(2, |columns| {
-                    egui::ScrollArea::vertical()
-                        .id_salt("results_col")
-                        .auto_shrink([false; 2])
-                        .show(&mut columns[0], |ui| {
-                            artifact_result_list(
-                                ui,
-                                "results_list",
-                                "Results",
-                                &scope_text,
-                                &self.artifact_match_search,
-                                &self.artifact_exact_matches,
-                                &self.artifact_partial_matches,
-                                &mut self.artifact_show_partial,
-                                &mut self.artifact_result_sort_key,
-                                &mut self.artifact_result_sort_desc,
-                                &self.artifact_desired_values,
-                                &self.artifact_can_values,
-                                Some(sel_idx),
-                                &mut self.artifact_pending_apply,
-                                &mut self.artifact_result_limit,
-                                self.config.always_load_all_results,
-                                ui.available_height().max(120.0),
-                            );
-                        });
-                    egui::ScrollArea::vertical()
-                        .id_salt("editors_col")
-                        .auto_shrink([false; 2])
-                        .show(&mut columns[1], |ui| {
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(ui.available_width(), panel_total),
-                                egui::Layout::top_down(egui::Align::Min),
-                                |ui| {
-                                    artifact_editor_panel(
-                                        ui,
-                                        "can_editor",
-                                        "Partial match",
-                                        &mut self.artifact_can_values,
-                                        drag_sensitivity,
-                                        subtype,
-                                        search_min_tier,
-                                        search_max_tier,
-                                        &values,
-                                        &resalter_boosts,
-                                        panel_total,
-                                        &mut search_changed,
-                                    );
-                                },
-                            );
-                            ui.add_space(7.0);
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(ui.available_width(), panel_total),
-                                egui::Layout::top_down(egui::Align::Min),
-                                |ui| {
-                                    artifact_editor_panel(
-                                        ui,
-                                        "must_editor",
-                                        "Must match",
-                                        &mut self.artifact_desired_values,
-                                        drag_sensitivity,
-                                        subtype,
-                                        search_min_tier,
-                                        search_max_tier,
-                                        &values,
-                                        &resalter_boosts,
-                                        panel_total,
-                                        &mut search_changed,
-                                    );
-                                },
-                            );
-                        });
-                });
+            // Right sidebar: the two editor panels, resizable, defaulting to 40% of the remaining width.
+            let full_width = ui.available_width();
+            let sidebar_width = if self.config.artifact_sidebar_width > 0.0 {
+                self.config.artifact_sidebar_width.max(320.0)
             } else {
-                let stacked_max = (ui.available_height() * 0.45).max(160.0);
-                egui::ScrollArea::vertical()
-                    .id_salt("stacked_grid")
-                    .auto_shrink([false; 2])
-                    .show(ui, |ui| {
-                        artifact_result_list(
-                            ui,
-                            "results_list",
-                            "Results",
-                            &scope_text,
-                            &self.artifact_match_search,
-                            &self.artifact_exact_matches,
-                            &self.artifact_partial_matches,
-                            &mut self.artifact_show_partial,
-                            &mut self.artifact_result_sort_key,
-                            &mut self.artifact_result_sort_desc,
-                            &self.artifact_desired_values,
-                            &self.artifact_can_values,
-                            Some(sel_idx),
-                            &mut self.artifact_pending_apply,
-                            &mut self.artifact_result_limit,
-                            self.config.always_load_all_results,
-                            stacked_max,
-                        );
-                        ui.add_space(8.0);
-                        artifact_editor_panel(
-                            ui,
-                            "can_editor",
-                            "Partial match",
-                            &mut self.artifact_can_values,
-                            drag_sensitivity,
-                            subtype,
-                            search_min_tier,
-                            search_max_tier,
-                            &values,
-                            &resalter_boosts,
-                            stacked_max,
-                            &mut search_changed,
-                        );
-                        ui.add_space(8.0);
-                        artifact_editor_panel(
-                            ui,
-                            "must_editor",
-                            "Must match",
-                            &mut self.artifact_desired_values,
-                            drag_sensitivity,
-                            subtype,
-                            search_min_tier,
-                            search_max_tier,
-                            &values,
-                            &resalter_boosts,
-                            stacked_max,
-                            &mut search_changed,
-                        );
-                    });
+                (full_width * 0.4).max(360.0)
+            };
+            let right_panel = egui::Panel::right("artifact_sidebar")
+                .resizable(true)
+                .default_size(sidebar_width)
+                .min_size(320.0)
+                .max_size(full_width * 0.8)
+                .size_range(320.0..=full_width * 0.8)
+                .show_inside(ui, |ui| {
+                    let editors_h = ((ui.available_height() - 15.0) / 2.0).max(120.0);
+
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), editors_h),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            artifact_editor_panel(
+                                ui,
+                                "can_editor",
+                                "Partial match",
+                                &mut self.artifact_can_values,
+                                drag_sensitivity,
+                                subtype,
+                                search_min_tier,
+                                search_max_tier,
+                                &values,
+                                &resalter_boosts,
+                                editors_h,
+                                &mut search_changed,
+                            );
+                        },
+                    );
+                    ui.add_space(7.0);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), editors_h),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            artifact_editor_panel(
+                                ui,
+                                "must_editor",
+                                "Must match",
+                                &mut self.artifact_desired_values,
+                                drag_sensitivity,
+                                subtype,
+                                search_min_tier,
+                                search_max_tier,
+                                &values,
+                                &resalter_boosts,
+                                editors_h,
+                                &mut search_changed,
+                            );
+                        },
+                    );
+                });
+
+            // Save the sidebar width when resized.
+            let actual_width = right_panel.response.rect.width();
+            if (actual_width - self.config.artifact_sidebar_width).abs() > 0.1 {
+                self.config.artifact_sidebar_width = actual_width;
+                self.config_save_timer = 0.5;
             }
 
-            // A search change triggered inside the panels must still recompute.
-            if search_changed {
-                recompute_matches(
-                    &mut self.artifact_exact_matches,
-                    &mut self.artifact_partial_matches,
+            // Central panel: the selected artifact header, search controls and the results list.
+            egui::CentralPanel::default().show_inside(ui, |ui| {
+                ui.heading(&entry.name);
+                ui.label(format!("Type: Charm - {}", subtype_name));
+                ui.label(format!(
+                    "Rarity: {}",
+                    match artifact_rarity(&values) {
+                        0 => "Common".to_string(),
+                        1 => "Rare".to_string(),
+                        2 => "Very Rare".to_string(),
+                        3 => "Legendary".to_string(),
+                        _ => "Epic".to_string(),
+                    }
+                ));
+                ui.separator();
+
+                artifact_header(
+                    ui,
+                    &mut self.artifact_match_search,
+                    &mut self.artifact_search_scope,
+                    &mut self.artifact_min_tier,
+                    &mut self.artifact_max_tier,
+                    drag_sensitivity,
+                    tier,
+                    seed,
+                    sel_idx,
+                    save,
+                    &mut search_changed,
+                );
+                // Remember the tier scope and sort settings when the config option is enabled.
+                if self.config.remember_artifact_search {
+                    let changed = self.config.artifact_search_scope != self.artifact_search_scope
+                        || self.config.artifact_result_sort_key != self.artifact_result_sort_key
+                        || self.config.artifact_result_sort_desc != self.artifact_result_sort_desc
+                        || self.config.artifact_result_sub_sort_key
+                            != self.artifact_result_sub_sort_key
+                        || self.config.artifact_result_sub_sort_desc
+                            != self.artifact_result_sub_sort_desc
+                        || self.config.artifact_use_sub_sort != self.artifact_use_sub_sort
+                        || self.config.artifact_result_group_by != self.artifact_result_group_by;
+                    self.config.artifact_search_scope = self.artifact_search_scope;
+                    self.config.artifact_result_sort_key = self.artifact_result_sort_key;
+                    self.config.artifact_result_sort_desc = self.artifact_result_sort_desc;
+                    self.config.artifact_result_sub_sort_key = self.artifact_result_sub_sort_key;
+                    self.config.artifact_result_sub_sort_desc = self.artifact_result_sub_sort_desc;
+                    self.config.artifact_use_sub_sort = self.artifact_use_sub_sort;
+                    self.config.artifact_result_group_by = self.artifact_result_group_by;
+                    if changed {
+                        self.config_save_timer = 0.1;
+                    }
+                }
+                ui.separator();
+
+                // The header can change the seed (tier/seed drags, reroll).
+                // Re-read it and the tier so the search follows the new seed/tier.
+                let seed = save
+                    .equipment
+                    .inventory_items
+                    .get(sel_idx)
+                    .map(artifact_seed)
+                    .unwrap_or(seed);
+                let tier = artifact_tier(seed);
+                if seed != entry.seed {
+                    search_changed = true;
+                }
+
+                // Live search: recompute both match lists whenever a setting changed.
+                if search_changed {
+                    recompute_matches(
+                        &mut self.artifact_exact_matches,
+                        &mut self.artifact_partial_matches,
+                        &self.artifact_desired_values,
+                        &self.artifact_can_values,
+                        subtype,
+                        self.artifact_search_scope,
+                        tier,
+                        self.artifact_min_tier,
+                        self.artifact_max_tier,
+                    );
+                    // A new result set starts at the size-based cap again.
+                    self.artifact_result_limit = None;
+                    search_changed = false;
+                }
+
+                // Apply a chosen seed from a match list (pending state set by the Apply button click, processed here so the lists can update).
+                if let Some(new_seed) = self.artifact_pending_apply.take()
+                    && let Some(item) = save.equipment.inventory_items.get_mut(sel_idx)
+                {
+                    item.artifact_seed = new_seed;
+                    item.upgrade = new_seed;
+                }
+
+                let scope_text = match self.artifact_search_scope {
+                    SearchTierScope::StaticTier => format!("tier {}", tier),
+                    SearchTierScope::MinMax => format!(
+                        "tiers {}-{}",
+                        self.artifact_min_tier, self.artifact_max_tier
+                    ),
+                    SearchTierScope::AllTiers => "all tiers".to_string(),
+                };
+
+                // The results list fill the rest of the central panel.
+                artifact_result_list(
+                    ui,
+                    "results_list",
+                    "Results",
+                    &scope_text,
+                    &self.artifact_match_search,
+                    &self.artifact_exact_matches,
+                    &self.artifact_partial_matches,
+                    &mut self.artifact_show_partial,
+                    &mut self.artifact_show_all_stats,
+                    subtype,
+                    &resalter_boosts,
+                    &mut self.artifact_result_sort_key,
+                    &mut self.artifact_result_sort_desc,
+                    &mut self.artifact_result_sub_sort_key,
+                    &mut self.artifact_result_sub_sort_desc,
+                    &mut self.artifact_use_sub_sort,
+                    &mut self.artifact_result_group_by,
+                    &mut self.artifact_collapsed_groups,
                     &self.artifact_desired_values,
                     &self.artifact_can_values,
-                    subtype,
-                    self.artifact_search_scope,
-                    tier,
-                    self.artifact_min_tier,
-                    self.artifact_max_tier,
+                    Some(sel_idx),
+                    &mut self.artifact_pending_apply,
+                    &mut self.artifact_result_limit,
+                    self.config.always_load_all_results,
+                    ui.available_height().max(120.0),
                 );
-                // A new result set starts at the size-based cap again.
-                self.artifact_result_limit = None;
-            }
-        });
+
+                // A search change triggered inside the panels must still recompute.
+                if search_changed {
+                    recompute_matches(
+                        &mut self.artifact_exact_matches,
+                        &mut self.artifact_partial_matches,
+                        &self.artifact_desired_values,
+                        &self.artifact_can_values,
+                        subtype,
+                        self.artifact_search_scope,
+                        tier,
+                        self.artifact_min_tier,
+                        self.artifact_max_tier,
+                    );
+                    // A new result set starts at the size-based cap again.
+                    self.artifact_result_limit = None;
+                }
+            });
+        } else {
+            egui::CentralPanel::default().show_inside(ui, |ui| {
+                ui.label("Select an artifact.");
+            });
+        }
 
         self.selected_artifact = selected;
 
         ui.add_space(16.0);
         ui.separator();
         self.show_talismans_ui(ui, save);
+    }
+
+    /// The Resalter artifact boost overrides for the current game path, cached so the JSON is not re-read from disk every frame.
+    /// Returns an owned copy so the caller can hold it across closures that also borrow `self`.
+    fn resalter_boosts_cache(&mut self) -> HashMap<i32, ArtifactBoostOverride> {
+        let path = self.config.game_path.clone();
+        if self
+            .resalter_boosts_cache
+            .as_ref()
+            .is_some_and(|(cached_path, _)| Some(cached_path) == path.as_ref())
+        {
+            return self.resalter_boosts_cache.as_ref().unwrap().1.clone();
+        }
+        let boosts = path
+            .as_deref()
+            .map(load_resalter_artifact_boosts)
+            .unwrap_or_default();
+        self.resalter_boosts_cache = Some((path.unwrap_or_default(), boosts.clone()));
+        boosts
     }
 
     /// Show equipped talismans and the effective charm values they produce.
@@ -999,7 +1287,8 @@ impl SaveEditor {
         }
 
         // Count flags across equipped talismans.
-        let mut flag_counts: std::collections::BTreeMap<i32, i32> = std::collections::BTreeMap::new();
+        let mut flag_counts: std::collections::BTreeMap<i32, i32> =
+            std::collections::BTreeMap::new();
         for (_, flags) in &talisman_flags {
             for flag in flags {
                 *flag_counts.entry(*flag).or_insert(0) += 1;

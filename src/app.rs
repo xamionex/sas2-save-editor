@@ -39,6 +39,10 @@ pub struct SaveEditor {
     pub monster_texture_cache: MonsterTextureCache,
     pub bestiary_search_filter: String,
     pub selected_bestiary_beast: Option<usize>,
+    /// Multi-selected beast indices (right-click toggles).
+    pub selected_bestiary_beasts: std::collections::HashSet<usize>,
+    /// Right-click gesture state for the bestiary grid.
+    pub bestiary_grid_sel: crate::tabs::multisel::GridSel<usize>,
     pub skilltree_catalog: Option<SkillTreeCatalog>,
     pub skilltree_catalog_error: Option<String>,
 
@@ -51,6 +55,10 @@ pub struct SaveEditor {
     pub skilltree_zoom: f32,
     pub skilltree_scroll: egui::Vec2,
     pub selected_skill_node: Option<usize>,
+    /// Multi-selected skill nodes (ctrl+click toggles, shift+click ranges).
+    pub selected_skill_nodes: std::collections::HashSet<usize>,
+    /// Selection gesture state for the skill tree.
+    pub skilltree_grid_sel: crate::tabs::multisel::GridSel<usize>,
     pub skilltree_centered: bool,
 
     // Whether the skill stats need to be recomputed from the tree
@@ -60,7 +68,19 @@ pub struct SaveEditor {
     pub item_search_filter: String,
     pub equipment_subtab: EquipmentSubTab,
     pub selected_equipment_item: Option<usize>,
+    /// Multi-selected inventory indices (right-click toggles). Empty when only the single selection is active.
+    pub selected_equipment_items: std::collections::HashSet<usize>,
+    /// Right-click gesture state for the inventory/stockpile grid.
+    pub equipment_grid_sel: crate::tabs::multisel::GridSel<usize>,
+    /// When true, the "Remove all by type" picker window is open.
+    pub equipment_remove_all_open: bool,
+    /// Item type-subtype categories checked in the remove-all picker.
+    pub equipment_remove_all_types: std::collections::HashSet<String>,
     pub selected_catalog_item: Option<usize>,
+    /// Multi-selected catalog items in the Add Items grid.
+    pub selected_catalog_items: std::collections::HashSet<usize>,
+    /// Selection gesture state for the Add Items grid.
+    pub add_items_grid_sel: crate::tabs::multisel::GridSel<usize>,
     pub add_item_count: i32,
     pub add_item_upgrade: i32,
 
@@ -78,10 +98,22 @@ pub struct SaveEditor {
     pub artifact_match_search: String,
     /// When true, the merged result lists also show partial matches.
     pub artifact_show_partial: bool,
-    /// Sort key of the merged result lists (closeness or a field id).
+    /// When true, the result list shows all artifact stat columns instead of only the filtered ones.
+    pub artifact_show_all_stats: bool,
+    /// Sort key of the merged result lists (closeness, tier or a field id).
     pub artifact_result_sort_key: crate::artifact::ResultSortKey,
     /// Sort direction of the merged result lists.
     pub artifact_result_sort_desc: bool,
+    /// Secondary sort key of the merged result lists (closeness, tier or a field id).
+    pub artifact_result_sub_sort_key: crate::artifact::ResultSortKey,
+    /// Secondary sort direction of the merged result lists.
+    pub artifact_result_sub_sort_desc: bool,
+    /// When true, the secondary sort is applied after the primary sort.
+    pub artifact_use_sub_sort: bool,
+    /// Grouping of the merged result lists (none, by tier, or by a field id).
+    pub artifact_result_group_by: crate::artifact::ResultGroupBy,
+    /// Group keys (e.g. "Tier 12") that are collapsed in the grouped result list.
+    pub artifact_collapsed_groups: std::collections::HashSet<String>,
     /// Tier scope of the live search.
     pub artifact_search_scope: crate::artifact::SearchTierScope,
     /// Minimum tier used when the search scope is MinMax.
@@ -92,6 +124,11 @@ pub struct SaveEditor {
     pub artifact_result_limit: Option<usize>,
     /// Pending seed to apply to the selected artifact, processed next frame.
     pub artifact_pending_apply: Option<i32>,
+    /// Cached Resalter artifact_boosts.json contents, keyed by game path.
+    pub resalter_boosts_cache: Option<(
+        std::path::PathBuf,
+        std::collections::HashMap<i32, crate::artifact::ArtifactBoostOverride>,
+    )>,
 
     // XNB exporter
     pub export_tree_loading: bool,
@@ -121,20 +158,35 @@ impl SaveEditor {
     /// Construct the app with a pre-loaded config (used by main.rs so window position/state can be applied before the window opens).
     pub fn with_config(config: SaveEditorConfig) -> Self {
         // Snapshot the remembered artifact search settings before config is moved into the app.
-        let (remember_scope, remember_sort_key, remember_sort_desc) =
-            if config.remember_artifact_search {
-                (
-                    config.artifact_search_scope,
-                    config.artifact_result_sort_key,
-                    config.artifact_result_sort_desc,
-                )
-            } else {
-                (
-                    crate::artifact::SearchTierScope::StaticTier,
-                    crate::artifact::ResultSortKey::Closeness,
-                    false,
-                )
-            };
+        let (
+            remember_scope,
+            remember_sort_key,
+            remember_sort_desc,
+            remember_sub_sort_key,
+            remember_sub_sort_desc,
+            remember_use_sub_sort,
+            remember_group_by,
+        ) = if config.remember_artifact_search {
+            (
+                config.artifact_search_scope,
+                config.artifact_result_sort_key,
+                config.artifact_result_sort_desc,
+                config.artifact_result_sub_sort_key,
+                config.artifact_result_sub_sort_desc,
+                config.artifact_use_sub_sort,
+                config.artifact_result_group_by,
+            )
+        } else {
+            (
+                crate::artifact::SearchTierScope::StaticTier,
+                crate::artifact::ResultSortKey::Closeness,
+                false,
+                crate::artifact::ResultSortKey::Closeness,
+                false,
+                false,
+                crate::artifact::ResultGroupBy::None,
+            )
+        };
         let mut app = Self {
             load_requested: false,
             save_data: None,
@@ -150,6 +202,8 @@ impl SaveEditor {
             monster_texture_cache: MonsterTextureCache::new(),
             bestiary_search_filter: String::new(),
             selected_bestiary_beast: None,
+            selected_bestiary_beasts: std::collections::HashSet::new(),
+            bestiary_grid_sel: crate::tabs::multisel::GridSel::default(),
             skilltree_catalog: None,
             skilltree_catalog_error: None,
 
@@ -160,6 +214,8 @@ impl SaveEditor {
             skilltree_zoom: 0.5,
             skilltree_scroll: egui::Vec2::ZERO,
             selected_skill_node: None,
+            selected_skill_nodes: std::collections::HashSet::new(),
+            skilltree_grid_sel: crate::tabs::multisel::GridSel::default(),
             skilltree_centered: false,
 
             stats_dirty: true,
@@ -167,7 +223,13 @@ impl SaveEditor {
             item_search_filter: String::new(),
             equipment_subtab: EquipmentSubTab::Inventory,
             selected_equipment_item: None,
+            selected_equipment_items: std::collections::HashSet::new(),
+            equipment_grid_sel: crate::tabs::multisel::GridSel::default(),
+            equipment_remove_all_open: false,
+            equipment_remove_all_types: std::collections::HashSet::new(),
             selected_catalog_item: None,
+            selected_catalog_items: std::collections::HashSet::new(),
+            add_items_grid_sel: crate::tabs::multisel::GridSel::default(),
             add_item_count: 1,
             add_item_upgrade: 0,
 
@@ -178,13 +240,20 @@ impl SaveEditor {
             artifact_partial_matches: Vec::new(),
             artifact_match_search: String::new(),
             artifact_show_partial: true,
+            artifact_show_all_stats: false,
             artifact_result_sort_key: remember_sort_key,
             artifact_result_sort_desc: remember_sort_desc,
+            artifact_result_sub_sort_key: remember_sub_sort_key,
+            artifact_result_sub_sort_desc: remember_sub_sort_desc,
+            artifact_use_sub_sort: remember_use_sub_sort,
+            artifact_result_group_by: remember_group_by,
+            artifact_collapsed_groups: std::collections::HashSet::new(),
             artifact_search_scope: remember_scope,
             artifact_min_tier: 0,
             artifact_max_tier: 40,
             artifact_result_limit: None,
             artifact_pending_apply: None,
+            resalter_boosts_cache: None,
 
             export_tree_loading: false,
             export_tree_receiver: None,
@@ -378,7 +447,9 @@ impl SaveEditor {
         // Start scanning in a background thread.
         let (tx, rx) = std::sync::mpsc::channel();
         let scan_root = game_path.join("Content");
-        let scan_root = if scan_root.is_dir() { scan_root } else {
+        let scan_root = if scan_root.is_dir() {
+            scan_root
+        } else {
             self.error_message = Some("Game doesn't have Content folder".to_string());
             return;
         };
@@ -422,6 +493,90 @@ impl SaveEditor {
                         }
                         if ui.button("Reset").clicked() {
                             self.config.item_icon_size = default_item_icon_size();
+                            self.config_save_timer = 0.1;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Upgrade Indicator:");
+                        let style = &mut self.config.upgrade_style;
+                        let mut changed = egui::ComboBox::from_id_salt("upgrade_style")
+                            .selected_text(match style {
+                                crate::tabs::multisel::UpgradeStyle::Off => "Off",
+                                crate::tabs::multisel::UpgradeStyle::Digits => "Digits",
+                                crate::tabs::multisel::UpgradeStyle::Roman => "Roman numerals",
+                            })
+                            .show_ui(ui, |ui| {
+                                let mut changed = false;
+                                changed |= ui
+                                    .selectable_value(
+                                        style,
+                                        crate::tabs::multisel::UpgradeStyle::Off,
+                                        "Off",
+                                    )
+                                    .changed();
+                                changed |= ui
+                                    .selectable_value(
+                                        style,
+                                        crate::tabs::multisel::UpgradeStyle::Digits,
+                                        "Digits",
+                                    )
+                                    .changed();
+                                changed |= ui
+                                    .selectable_value(
+                                        style,
+                                        crate::tabs::multisel::UpgradeStyle::Roman,
+                                        "Roman numerals",
+                                    )
+                                    .changed();
+                                changed
+                            })
+                            .inner
+                            .unwrap_or(false);
+                        if ui.button("Reset").clicked() {
+                            self.config.upgrade_style =
+                                crate::tabs::multisel::UpgradeStyle::Digits;
+                            changed = true;
+                        }
+                        if changed {
+                            self.config_save_timer = 0.1;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Artifact Seed Indicator:");
+                        let style = &mut self.config.artifact_seed_style;
+                        let mut changed = egui::ComboBox::from_id_salt("artifact_seed_style")
+                            .selected_text(match style {
+                                crate::tabs::multisel::UpgradeStyle::Off => "Off",
+                                _ => "Digits",
+                            })
+                            .show_ui(ui, |ui| {
+                                let mut changed = false;
+                                changed |= ui
+                                    .selectable_value(
+                                        style,
+                                        crate::tabs::multisel::UpgradeStyle::Off,
+                                        "Off",
+                                    )
+                                    .changed();
+                                changed |= ui
+                                    .selectable_value(
+                                        style,
+                                        crate::tabs::multisel::UpgradeStyle::Digits,
+                                        "Digits",
+                                    )
+                                    .changed();
+                                changed
+                            })
+                            .inner
+                            .unwrap_or(false);
+                        if ui.button("Reset").clicked() {
+                            self.config.artifact_seed_style =
+                                crate::tabs::multisel::UpgradeStyle::Digits;
+                            changed = true;
+                        }
+                        if changed {
                             self.config_save_timer = 0.1;
                         }
                     });

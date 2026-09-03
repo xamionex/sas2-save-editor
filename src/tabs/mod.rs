@@ -5,6 +5,7 @@ pub mod cosmetics;
 pub mod equipment;
 pub mod faction;
 pub mod flags;
+pub mod multisel;
 pub mod skilltree;
 pub mod stats;
 
@@ -21,7 +22,7 @@ pub enum Tab {
     ConvertSave,
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum EquipmentSubTab {
     Inventory,
     Stockpile,

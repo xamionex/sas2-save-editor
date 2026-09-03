@@ -51,14 +51,33 @@ pub struct SaveEditorConfig {
     #[serde(default)]
     pub account_for_starstones: bool,
 
+    /// How item upgrade levels are shown on grid icons: off, digits, or roman numerals.
+    #[serde(default)]
+    pub upgrade_style: crate::tabs::multisel::UpgradeStyle,
+
+    /// How artifact seeds are shown on artifact icons: off or digits.
+    #[serde(default)]
+    pub artifact_seed_style: crate::tabs::multisel::UpgradeStyle,
+
     #[serde(default)]
     pub equipment_panel_width: f32,
+
+    #[serde(default)]
+    pub add_items_panel_width: f32,
 
     #[serde(default)]
     pub skilltree_panel_width: f32,
 
     #[serde(default)]
     pub bestiary_panel_width: f32,
+
+    /// Last width of the artifacts tab's left artifact list panel.
+    #[serde(default)]
+    pub artifact_list_width: f32,
+
+    /// Last width of the artifacts tab's right editor sidebar.
+    #[serde(default)]
+    pub artifact_sidebar_width: f32,
 
     /// Remember and restore the window position on startup.
     #[serde(default = "default_true")]
@@ -100,6 +119,22 @@ pub struct SaveEditorConfig {
     /// Last artifact result sort direction (true = descending).
     #[serde(default)]
     pub artifact_result_sort_desc: bool,
+
+    /// Last artifact result secondary sort key.
+    #[serde(default)]
+    pub artifact_result_sub_sort_key: crate::artifact::ResultSortKey,
+
+    /// Last artifact result secondary sort direction (true = descending).
+    #[serde(default)]
+    pub artifact_result_sub_sort_desc: bool,
+
+    /// When true, the secondary artifact result sort is applied after the primary sort.
+    #[serde(default)]
+    pub artifact_use_sub_sort: bool,
+
+    /// Last artifact result grouping (none, by tier, or by a field id).
+    #[serde(default)]
+    pub artifact_result_group_by: crate::artifact::ResultGroupBy,
 
     /// Always load all artifact search results, bypassing the load-more cap.
     #[serde(default)]
@@ -146,9 +181,14 @@ impl Default for SaveEditorConfig {
             remove_gray_starstones: false,
             account_for_level: false,
             account_for_starstones: false,
+            upgrade_style: crate::tabs::multisel::UpgradeStyle::Digits,
+            artifact_seed_style: crate::tabs::multisel::UpgradeStyle::Digits,
             equipment_panel_width: 0.0,
+            add_items_panel_width: 0.0,
             skilltree_panel_width: 0.0,
             bestiary_panel_width: 0.0,
+            artifact_list_width: 0.0,
+            artifact_sidebar_width: 0.0,
             save_window_position: true,
             force_x11_for_position: false,
             save_window_state: true,
@@ -159,6 +199,10 @@ impl Default for SaveEditorConfig {
             artifact_search_scope: crate::artifact::SearchTierScope::StaticTier,
             artifact_result_sort_key: crate::artifact::ResultSortKey::Closeness,
             artifact_result_sort_desc: false,
+            artifact_result_sub_sort_key: crate::artifact::ResultSortKey::Closeness,
+            artifact_result_sub_sort_desc: false,
+            artifact_use_sub_sort: false,
+            artifact_result_group_by: crate::artifact::ResultGroupBy::None,
             always_load_all_results: false,
         }
     }

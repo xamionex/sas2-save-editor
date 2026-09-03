@@ -22,7 +22,11 @@ impl DotNetRandom {
 
     pub fn new(seed: i32) -> Self {
         let mut seed_array = [0i32; 56];
-        let num = if seed == i32::MIN { i32::MAX } else { seed.abs() };
+        let num = if seed == i32::MIN {
+            i32::MAX
+        } else {
+            seed.abs()
+        };
         let mut num2 = Self::MSEED.wrapping_sub(num);
         seed_array[55] = num2;
         let mut num3 = 1;
@@ -268,38 +272,38 @@ pub fn artifact_rarity(values: &[f32; 35]) -> i32 {
 /// Vanilla magnitude per charm flag (what a single talisman contributes at tier 1).
 pub fn charm_vanilla(flag: i32) -> f32 {
     match flag {
-        0 => 10.0,       // Phys Def
-        1..=5 => 20.0,   // Elemental Def
-        6 => 10.0,       // Item Find
-        7 => 0.15,       // Rage Gain
-        8 => 1.0,        // Rage Window
-        9 | 10 => 1.0,   // Wood Runes / Poise
-        11 => 2.0,       // Fast grapple/climb
-        12 => 10.0,      // Stamina Regen
-        13 => 50.0,      // Silver Find
-        14 => 10.0,      // Damage
-        15 => 5.0,       // Gold
-        16..=20 => 20.0, // Elemental Atk
-        21..=28 => 1.0,  // Multiplayer flags
-        29 => 5.0,       // Carry Weight
-        30 | 31 => 5.0,  // HP/MP Kill Gain
-        32 => 50.0,      // Parry Stagger Damage
-        33 => 25.0,      // MP Regain
-        34 => 50.0,      // Riposte Dmg
-        35 => 50.0,      // Dying Boost
-        36 | 37 | 39 => 5.0,  // Max HP/Rage/Stamina Boost
-        38 => 10.0,      // Max MP Boost
-        40 | 41 => 2.5,  // MP/HP Parry regain
-        42 | 43 => 50.0, // MP/HP Riposte regain
-        44 => 50.0,      // Restock speed
-        45 | 46 => 12.5, // Rage Parry/Riposte regain
-        47 => 1.0,       // Stamina coverage
-        48 => 10.0,      // Blocking stamina cheap
-        49 => 15.0,      // Runic art boost
-        50 => 50.0,      // Faster Drinking
-        51 => 3.1,       // Overall defense
-        52 | 53 => 10.0, // Haze HP/MP
-        54 => 3.0,       // Haze Rage
+        0 => 10.0,           // Phys Def
+        1..=5 => 20.0,       // Elemental Def
+        6 => 10.0,           // Item Find
+        7 => 0.15,           // Rage Gain
+        8 => 1.0,            // Rage Window
+        9 | 10 => 1.0,       // Wood Runes / Poise
+        11 => 2.0,           // Fast grapple/climb
+        12 => 10.0,          // Stamina Regen
+        13 => 50.0,          // Silver Find
+        14 => 10.0,          // Damage
+        15 => 5.0,           // Gold
+        16..=20 => 20.0,     // Elemental Atk
+        21..=28 => 1.0,      // Multiplayer flags
+        29 => 5.0,           // Carry Weight
+        30 | 31 => 5.0,      // HP/MP Kill Gain
+        32 => 50.0,          // Parry Stagger Damage
+        33 => 25.0,          // MP Regain
+        34 => 50.0,          // Riposte Dmg
+        35 => 50.0,          // Dying Boost
+        36 | 37 | 39 => 5.0, // Max HP/Rage/Stamina Boost
+        38 => 10.0,          // Max MP Boost
+        40 | 41 => 2.5,      // MP/HP Parry regain
+        42 | 43 => 50.0,     // MP/HP Riposte regain
+        44 => 50.0,          // Restock speed
+        45 | 46 => 12.5,     // Rage Parry/Riposte regain
+        47 => 1.0,           // Stamina coverage
+        48 => 10.0,          // Blocking stamina cheap
+        49 => 15.0,          // Runic art boost
+        50 => 50.0,          // Faster Drinking
+        51 => 3.1,           // Overall defense
+        52 | 53 => 10.0,     // Haze HP/MP
+        54 => 3.0,           // Haze Rage
         _ => 1.0,
     }
 }
@@ -347,8 +351,7 @@ pub struct ArtifactBoostOverride {
 /// Returns an empty map when the file is missing or unreadable.
 pub fn load_resalter_artifact_boosts(game_path: &Path) -> HashMap<i32, ArtifactBoostOverride> {
     let mut result = HashMap::new();
-    let path = game_path
-        .join("BepInEx/config/amione.SaS2Resalter/artifact_boosts.json");
+    let path = game_path.join("BepInEx/config/amione.SaS2Resalter/artifact_boosts.json");
     let Ok(data) = std::fs::read_to_string(&path) else {
         return result;
     };
@@ -368,11 +371,8 @@ pub fn load_resalter_artifact_boosts(game_path: &Path) -> HashMap<i32, ArtifactB
                 .map(|v| v as f32)
                 .unwrap_or(0.0)
         };
-        let boolean = |name: &str| -> bool {
-            obj.get(name)
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-        };
+        let boolean =
+            |name: &str| -> bool { obj.get(name).and_then(|v| v.as_bool()).unwrap_or(false) };
         result.insert(
             field,
             ArtifactBoostOverride {
@@ -423,12 +423,37 @@ pub fn vanilla_value_range(subtype: i32, tier: i32, field: i32) -> Option<(f32, 
         return None;
     }
     let (soft_min, raw_min, raw_max, max) = match subtype {
-        3 => (5.0, (num + 5) as f32 * 0.25, (num + 5) as f32 * 0.25 + 5.0, 20.0),
-        4 => (5.0, (num + 5) as f32 * 0.25, (num + 5) as f32 * 0.25 + 5.0, 20.0),
+        3 => (
+            5.0,
+            (num + 5) as f32 * 0.25,
+            (num + 5) as f32 * 0.25 + 5.0,
+            20.0,
+        ),
+        4 => (
+            5.0,
+            (num + 5) as f32 * 0.25,
+            (num + 5) as f32 * 0.25 + 5.0,
+            20.0,
+        ),
         5 => match field {
-            27 => (5.0, (num + 5) as f32 * 0.5, (num + 5) as f32 * 0.5 + 10.0, 60.0),
-            31 | 32 => (5.0, (num + 5) as f32 * 0.5, (num + 5) as f32 * 0.5 + 5.0, 50.0),
-            _ => (5.0, (num + 5) as f32 * 0.25, (num + 5) as f32 * 0.25 + 5.0, 20.0),
+            27 => (
+                5.0,
+                (num + 5) as f32 * 0.5,
+                (num + 5) as f32 * 0.5 + 10.0,
+                60.0,
+            ),
+            31 | 32 => (
+                5.0,
+                (num + 5) as f32 * 0.5,
+                (num + 5) as f32 * 0.5 + 5.0,
+                50.0,
+            ),
+            _ => (
+                5.0,
+                (num + 5) as f32 * 0.25,
+                (num + 5) as f32 * 0.25 + 5.0,
+                20.0,
+            ),
         },
         _ => return None,
     };
@@ -466,11 +491,7 @@ pub fn effective_range_union(
         min = min.min(lo);
         max = max.max(hi);
     }
-    if max < min {
-        None
-    } else {
-        Some((min, max))
-    }
+    if max < min { None } else { Some((min, max)) }
 }
 
 /// A candidate artifact seed whose values contain all the desired fields.
@@ -495,11 +516,21 @@ pub enum SearchTierScope {
     AllTiers,
 }
 
-/// The sort key of the merged result list: closeness or an artifact field.
+/// The sort key of the merged result list: closeness, tier or an artifact field.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize, Default)]
 pub enum ResultSortKey {
     #[default]
     Closeness,
+    Tier,
+    Field(i32),
+}
+
+/// How the merged result list is grouped: not grouped, by tier, or by an artifact field.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize, Default)]
+pub enum ResultGroupBy {
+    #[default]
+    None,
+    Tier,
     Field(i32),
 }
 
@@ -855,12 +886,27 @@ mod tests {
 
     #[test]
     fn search_tier_range_scopes() {
-        assert_eq!(search_tier_range(SearchTierScope::StaticTier, 6, 2, 10), (6, 6));
-        assert_eq!(search_tier_range(SearchTierScope::AllTiers, 6, 2, 10), (0, 40));
-        assert_eq!(search_tier_range(SearchTierScope::MinMax, 6, 2, 10), (2, 10));
+        assert_eq!(
+            search_tier_range(SearchTierScope::StaticTier, 6, 2, 10),
+            (6, 6)
+        );
+        assert_eq!(
+            search_tier_range(SearchTierScope::AllTiers, 6, 2, 10),
+            (0, 40)
+        );
+        assert_eq!(
+            search_tier_range(SearchTierScope::MinMax, 6, 2, 10),
+            (2, 10)
+        );
         // Min/max are clamped into 0..=40 and min <= max.
-        assert_eq!(search_tier_range(SearchTierScope::MinMax, 6, -5, 99), (0, 40));
-        assert_eq!(search_tier_range(SearchTierScope::MinMax, 6, 12, 7), (12, 12));
+        assert_eq!(
+            search_tier_range(SearchTierScope::MinMax, 6, -5, 99),
+            (0, 40)
+        );
+        assert_eq!(
+            search_tier_range(SearchTierScope::MinMax, 6, 12, 7),
+            (12, 12)
+        );
     }
 
     #[test]

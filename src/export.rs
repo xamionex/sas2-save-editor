@@ -37,7 +37,7 @@ pub fn build_xnb_tree(path: &Path) -> Option<XnbNode> {
         children: Vec::new(),
         selected: true,
     };
-    
+
     if path.is_dir() {
         if let Ok(read) = fs::read_dir(path) {
             for entry in read.flatten() {

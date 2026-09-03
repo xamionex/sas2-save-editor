@@ -88,8 +88,7 @@ impl MonsterTextureCache {
     pub(crate) fn set_game_path(&mut self, game_path: &Path) {
         self.game_path = Some(game_path.to_path_buf());
 
-        // Load sprite-cell metadata so assemble_monster_sprite can use the real
-        // srcRect / origin for each tile rather than assuming a 128×128 grid.
+        // Load sprite-cell metadata so assemble_monster_sprite can use the real srcRect / origin for each tile rather than assuming a 128×128 grid.
         let flagdefs_path = game_path.join("Content").join("gfx").join("flagdefs.zfd");
         let master_path = game_path.join("Content").join("gfx").join("master.zcm");
 
@@ -365,8 +364,8 @@ pub fn assemble_monster_sprite(
 
         let (cx, cy, rot) = transforms[i].unwrap();
 
-        // Game natively authors facing right (face = 1). We do not negate cy here,
-        // as XNA transforms are intrinsically Y-Down in the engine.
+        // Game natively authors facing right (face = 1).
+        // We do not negate cy here, as XNA transforms are intrinsically Y-Down in the engine.
         parts.push(PartInfo {
             src_x,
             src_y,
