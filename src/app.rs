@@ -126,6 +126,14 @@ pub struct SaveEditor {
     pub artifact_pending_apply: Option<i32>,
     /// Pending seed to add as a new artifact item (Add to Inventory), processed next frame.
     pub artifact_pending_add: Option<i32>,
+    /// Pending seed to add as a new stockpiled artifact item (Add to stockpile), processed next frame.
+    pub artifact_pending_add_stockpile: Option<i32>,
+    /// Pending removal of the artifact at this inventory index, processed next frame.
+    pub artifact_pending_remove: Option<usize>,
+    /// Pending clone of the artifact at this inventory index, processed next frame.
+    pub artifact_pending_clone: Option<usize>,
+    /// Pending move of the artifact at this inventory index by this many slots (-1 up, +1 down), processed next frame.
+    pub artifact_pending_move: Option<(usize, i32)>,
     /// Cached Resalter artifact_boosts.json contents, keyed by game path.
     pub resalter_boosts_cache: Option<(
         std::path::PathBuf,
@@ -256,6 +264,10 @@ impl SaveEditor {
             artifact_result_limit: None,
             artifact_pending_apply: None,
             artifact_pending_add: None,
+            artifact_pending_add_stockpile: None,
+            artifact_pending_remove: None,
+            artifact_pending_clone: None,
+            artifact_pending_move: None,
             resalter_boosts_cache: None,
 
             export_tree_loading: false,

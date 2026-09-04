@@ -428,6 +428,7 @@ fn artifact_result_list(
     apply_target: Option<usize>,
     pending_apply: &mut Option<i32>,
     pending_add: &mut Option<i32>,
+    pending_add_stockpile: &mut Option<i32>,
     limit: &mut Option<usize>,
     always_all: bool,
     max_height: f32,
@@ -705,6 +706,8 @@ fn artifact_result_list(
                 measure(ui, "Apply", &button_font_id) + 2.0 * ui.spacing().button_padding.x;
             let add_w = measure(ui, "Add to Inventory", &button_font_id)
                 + 2.0 * ui.spacing().button_padding.x;
+            let add_stockpile_w = measure(ui, "Add to stockpile", &button_font_id)
+                + 2.0 * ui.spacing().button_padding.x;
             let mut col_widths: Vec<f32> = Vec::with_capacity(num_cols);
             col_widths.push(measure(ui, "Seed", &font_id).max(40.0) + 2.0);
             col_widths.push(measure(ui, "Tier", &font_id) + 2.0);
@@ -712,7 +715,7 @@ fn artifact_result_list(
                 col_widths.push(measure(ui, &field_name(*f), &font_id) + 2.0);
             }
             col_widths.push(measure(ui, "Closeness", &font_id) + 2.0);
-            col_widths.push(apply_w + add_w + 2.0 * 2.0);
+            col_widths.push(apply_w + add_w + add_stockpile_w + 3.0 * 2.0);
 
             // Widen columns to fit a sample of the data so cells never overflow their column.
             let sample = laid_out.iter().take(300);
@@ -879,6 +882,18 @@ fn artifact_result_list(
                                     {
                                         *pending_add = Some(m.seed);
                                     }
+                                    if ui
+                                        .add_sized(
+                                            [add_stockpile_w, row_height],
+                                            egui::Button::new("Add to stockpile"),
+                                        )
+                                        .on_hover_text(
+                                            "Add a new stockpiled artifact with this seed",
+                                        )
+                                        .clicked()
+                                    {
+                                        *pending_add_stockpile = Some(m.seed);
+                                    }
                                 });
                             }
                         });
@@ -897,6 +912,35 @@ impl SaveEditor {
             )
             .wrap(),
         );
+
+        // Apply pending list actions from the row buttons (set last frame, applied here so the list and selection stay in sync).
+        if let Some(idx) = self.artifact_pending_remove.take() {
+            if idx < save.equipment.inventory_items.len() {
+                save.equipment.inventory_items.remove(idx);
+            }
+            if self.selected_artifact == Some(idx) {
+                self.selected_artifact = None;
+            }
+        }
+        if let Some(idx) = self.artifact_pending_clone.take()
+            && idx < save.equipment.inventory_items.len()
+        {
+            let clone = save.equipment.inventory_items[idx].clone();
+            save.equipment.inventory_items.push(clone);
+            self.selected_artifact = Some(save.equipment.inventory_items.len() - 1);
+        }
+        if let Some((idx, dir)) = self.artifact_pending_move.take() {
+            let items = &mut save.equipment.inventory_items;
+            if idx < items.len() {
+                let target = idx as i32 + dir;
+                if target >= 0 && (target as usize) < items.len() {
+                    items.swap(idx, target as usize);
+                    if self.selected_artifact == Some(idx) {
+                        self.selected_artifact = Some(target as usize);
+                    }
+                }
+            }
+        }
 
         // Collect artifact items (type 6, subtype 3/4/5) as owned data.
         let catalog = self.catalog.as_ref();
@@ -933,11 +977,11 @@ impl SaveEditor {
         let resalter_boosts = self.resalter_boosts_cache();
         let drag_sensitivity = self.config.drag_value_sensitivity;
 
-        // Left panel: artifact list, 30% narrower than before.
+        // Left panel: artifact list.
         let list_width = if self.config.artifact_list_width > 0.0 {
             self.config.artifact_list_width.max(120.0)
         } else {
-            196.0
+            330.0
         };
         let left_panel = egui::Panel::left("artifact_list")
             .resizable(true)
@@ -946,6 +990,32 @@ impl SaveEditor {
             .frame(egui::Frame::NONE)
             .show_inside(ui, |ui| {
                 ui.label(egui::RichText::new("Artifacts").strong());
+                // Row button widths, measured once: the label truncates into the remaining space so the buttons stay visible.
+                let button_font_id = egui::TextStyle::Button.resolve(ui.style());
+                let measure = |ui: &Ui, text: &str| -> f32 {
+                    ui.fonts_mut(|f| {
+                        f.layout_no_wrap(
+                            text.to_string(),
+                            button_font_id.clone(),
+                            egui::Color32::PLACEHOLDER,
+                        )
+                        .size()
+                        .x
+                    })
+                };
+                let btn_w =
+                    |ui: &Ui, text: &str| measure(ui, text) + 2.0 * ui.spacing().button_padding.x;
+                let row_buttons_w = btn_w(ui, "Remove")
+                    + btn_w(ui, "Clone")
+                    + btn_w(ui, "/\\")
+                    + btn_w(ui, "\\/")
+                    // Five gaps: after the label, between the four buttons, and after the last button (egui adds item_spacing after every widget).
+                    + 5.0 * ui.spacing().item_spacing.x
+                    // Trailing padding after the last button: without it every row is 6px wider than the panel, so the panel grows 6px per repaint until it fills the window.
+                    + 6.0
+                    // Slack for pixel rounding: the estimate must never be smaller than the real row width, or the panel grows a pixel per repaint.
+                    + 2.0;
+                let row_h = ui.text_style_height(&egui::TextStyle::Body);
                 egui::ScrollArea::vertical()
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
@@ -953,6 +1023,7 @@ impl SaveEditor {
                             let tier = artifact_tier(entry.seed);
                             let values = compute_artifact_values(entry.seed, entry.subtype, tier);
                             let rarity = artifact_rarity(&values);
+                            let is_selected = selected == Some(entry.inv_idx);
                             let label = format!(
                                 "{} (T{}{})",
                                 entry.name,
@@ -963,23 +1034,50 @@ impl SaveEditor {
                                     String::new()
                                 }
                             );
-                            if ui
-                                .selectable_label(selected == Some(entry.inv_idx), label)
-                                .clicked()
-                            {
-                                if selected != Some(entry.inv_idx) {
-                                    selected_changed = true;
-                                    // A different artifact means a different search: reset the sort to closeness.
-                                    self.artifact_result_sort_key = ResultSortKey::Closeness;
-                                    self.artifact_result_sort_desc = false;
-                                    self.artifact_result_sub_sort_key = ResultSortKey::Closeness;
-                                    self.artifact_result_sub_sort_desc = false;
-                                    self.artifact_use_sub_sort = false;
-                                    self.artifact_result_group_by = ResultGroupBy::None;
-                                    self.artifact_collapsed_groups.clear();
+                            ui.horizontal(|ui| {
+                                let label_w = (ui.available_width() - row_buttons_w).max(40.0);
+                                if ui
+                                    .add_sized(
+                                        [label_w, row_h],
+                                        egui::Button::selectable(is_selected, label).truncate(),
+                                    )
+                                    .clicked()
+                                {
+                                    if !is_selected {
+                                        selected_changed = true;
+                                        // A different artifact means a different search: reset the sort to closeness.
+                                        self.artifact_result_sort_key = ResultSortKey::Closeness;
+                                        self.artifact_result_sort_desc = false;
+                                        self.artifact_result_sub_sort_key =
+                                            ResultSortKey::Closeness;
+                                        self.artifact_result_sub_sort_desc = false;
+                                        self.artifact_use_sub_sort = false;
+                                        self.artifact_result_group_by = ResultGroupBy::None;
+                                        self.artifact_collapsed_groups.clear();
+                                    }
+                                    selected = Some(entry.inv_idx);
                                 }
-                                selected = Some(entry.inv_idx);
-                            }
+                                ui.small_button("Remove")
+                                    .on_hover_text("Remove this artifact from the inventory")
+                                    .clicked()
+                                    .then(|| self.artifact_pending_remove = Some(entry.inv_idx));
+                                ui.small_button("Clone")
+                                    .on_hover_text("Duplicate this artifact")
+                                    .clicked()
+                                    .then(|| self.artifact_pending_clone = Some(entry.inv_idx));
+                                ui.small_button("/\\")
+                                    .on_hover_text("Move this artifact up")
+                                    .clicked()
+                                    .then(|| {
+                                        self.artifact_pending_move = Some((entry.inv_idx, -1))
+                                    });
+                                ui.small_button("\\/")
+                                    .on_hover_text("Move this artifact down")
+                                    .clicked()
+                                    .then(|| self.artifact_pending_move = Some((entry.inv_idx, 1)));
+                                // Right padding so the last button does not touch the sidebar edge.
+                                ui.add_space(6.0);
+                            });
                         }
                     });
             });
@@ -1187,6 +1285,24 @@ impl SaveEditor {
                         rarity: 1,
                     });
                 }
+                // Add a brand-new stockpiled artifact with the chosen seed.
+                if let Some(new_seed) = self.artifact_pending_add_stockpile.take() {
+                    let loot_idx = save
+                        .equipment
+                        .inventory_items
+                        .get(sel_idx)
+                        .map(|i| i.loot_idx)
+                        .unwrap_or(0);
+                    save.equipment.inventory_items.push(Item {
+                        loot_idx,
+                        count: 1,
+                        upgrade: new_seed,
+                        stock_piled: true,
+                        artifact_seed: new_seed,
+                        item_version: 0,
+                        rarity: 1,
+                    });
+                }
 
                 let scope_text = match self.artifact_search_scope {
                     SearchTierScope::StaticTier => format!("tier {}", tier),
@@ -1222,6 +1338,7 @@ impl SaveEditor {
                     Some(sel_idx),
                     &mut self.artifact_pending_apply,
                     &mut self.artifact_pending_add,
+                    &mut self.artifact_pending_add_stockpile,
                     &mut self.artifact_result_limit,
                     self.config.always_load_all_results,
                     ui.available_height().max(120.0),
