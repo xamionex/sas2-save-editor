@@ -54,9 +54,10 @@ fn recompute_matches(
     current_tier: i32,
     min_tier: i32,
     max_tier: i32,
+    resalter: &HashMap<i32, ArtifactBoostOverride>,
 ) {
     let (lo, hi) = search_tier_range(scope, current_tier, min_tier, max_tier);
-    let results = find_matches(subtype, lo, hi, must, can);
+    let results = find_matches(subtype, lo, hi, must, can, resalter);
     *exact = results.exact;
     *partial = results.partial;
 }
@@ -1015,11 +1016,18 @@ impl SaveEditor {
                     + 6.0
                     // Slack for pixel rounding: the estimate must never be smaller than the real row width, or the panel grows a pixel per repaint.
                     + 2.0;
-                let row_h = ui.text_style_height(&egui::TextStyle::Body);
+                // Uniform row height: the label button is sized to the interact height and the small buttons are text-height, so every row is identical.
+                let text_height = ui.text_style_height(&egui::TextStyle::Body);
+                let button_height = (text_height + 2.0 * ui.spacing().button_padding.y)
+                    .max(ui.spacing().interact_size.y);
+                let row_h = text_height.max(button_height);
+                // Virtualized rows: only the rows visible in the scroll viewport are laid out each frame.
+                // A large artifact inventory renders a handful of widgets instead of one per artifact.
                 egui::ScrollArea::vertical()
                     .auto_shrink([false; 2])
-                    .show(ui, |ui| {
-                        for entry in &artifacts {
+                    .show_rows(ui, row_h, artifacts.len(), |ui, row_range| {
+                        for row in row_range {
+                            let entry = &artifacts[row];
                             let tier = artifact_tier(entry.seed);
                             let values = compute_artifact_values(entry.seed, entry.subtype, tier);
                             let rarity = artifact_rarity(&values);
@@ -1254,6 +1262,7 @@ impl SaveEditor {
                         tier,
                         self.artifact_min_tier,
                         self.artifact_max_tier,
+                        &resalter_boosts,
                     );
                     // A new result set starts at the size-based cap again.
                     self.artifact_result_limit = None;
@@ -1356,6 +1365,7 @@ impl SaveEditor {
                         tier,
                         self.artifact_min_tier,
                         self.artifact_max_tier,
+                        &resalter_boosts,
                     );
                     // A new result set starts at the size-based cap again.
                     self.artifact_result_limit = None;

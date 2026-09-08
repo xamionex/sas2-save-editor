@@ -570,15 +570,55 @@ pub struct SearchResults {
 }
 
 /// Collect the actual values of `fields` that are nonzero on an artifact.
-fn collect_values(values: &[f32; 35], fields: &[i32]) -> Vec<(i32, f32)> {
+/// A Resalter override replaces the rolled value: static uses the static value, min/max uses the range midpoint (the actual roll is random in the range).
+fn collect_values(
+    values: &[f32; 35],
+    fields: &[i32],
+    resalter: &HashMap<i32, ArtifactBoostOverride>,
+) -> Vec<(i32, f32)> {
     let mut vals = Vec::with_capacity(fields.len());
     for f in fields {
-        let v = values[*f as usize];
+        let v = effective_value(*f, values, resalter);
         if v > 0.0 {
             vals.push((*f, v));
         }
     }
     vals
+}
+
+/// The value a field effectively has in-game: the Resalter override when present, else the rolled value.
+fn effective_value(
+    field: i32,
+    values: &[f32; 35],
+    resalter: &HashMap<i32, ArtifactBoostOverride>,
+) -> f32 {
+    if let Some(o) = resalter.get(&field) {
+        if o.static_boost {
+            return o.static_value;
+        }
+        return (o.min + o.max) * 0.5;
+    }
+    values[field as usize]
+}
+
+/// Whether a desired value is achievable for a field given a Resalter override.
+/// Static: the value is fixed, so only values within 0.05 of it match.
+/// Min/max: the value rolls uniformly in the range, so any value inside it (with the same epsilon the UI uses) is achievable.
+fn override_matches(want: f32, o: &ArtifactBoostOverride) -> bool {
+    if o.static_boost {
+        (o.static_value - want).abs() <= 0.05
+    } else {
+        want >= o.min - 0.05 && want <= o.max + 0.05 - 0.0001
+    }
+}
+
+/// Whether a field is present (nonzero) under a Resalter override.
+fn override_present(o: &ArtifactBoostOverride) -> bool {
+    if o.static_boost {
+        o.static_value > 0.0
+    } else {
+        o.max > 0.0
+    }
 }
 
 /// Find the exact and partial matches for the combined must/can filters.
@@ -588,12 +628,18 @@ fn collect_values(values: &[f32; 35], fields: &[i32]) -> Vec<(i32, f32)> {
 /// Partial matches: every can field present, excluding seeds already listed as exact matches.
 /// With no can filters set, nothing is partial.
 /// Every match carries the actual values of all filtered fields that are present on the artifact (the union of the must and can fields).
+///
+/// A Resalter override changes what the game shows for a field regardless of the seed:
+/// static fixes the value, min/max rolls it uniformly in the range. The search accounts for
+/// that: with a static override every seed matches (the value is the same everywhere), and
+/// with a min/max override a desired value inside the range is achievable on any seed.
 pub fn find_matches(
     subtype: i32,
     min_tier: i32,
     max_tier: i32,
     must: &HashMap<i32, f32>,
     can: &HashMap<i32, f32>,
+    resalter: &HashMap<i32, ArtifactBoostOverride>,
 ) -> SearchResults {
     let must = nonzero_desired(must);
     let can = nonzero_desired(can);
@@ -621,8 +667,13 @@ pub fn find_matches(
             let mut can_ok = true;
             let mut can_error = 0.0;
             for (field, want) in &can {
-                let actual = values[*field as usize];
-                if actual <= 0.0 {
+                let actual = effective_value(*field, &values, resalter);
+                if let Some(o) = resalter.get(field) {
+                    if !override_present(o) {
+                        can_ok = false;
+                        break;
+                    }
+                } else if actual <= 0.0 {
                     can_ok = false;
                     break;
                 }
@@ -635,25 +686,37 @@ pub fn find_matches(
             let mut must_ok = true;
             let mut must_error = 0.0;
             for (field, want) in &must {
-                let actual = values[*field as usize];
-                if actual <= 0.0 || (actual - want).abs() > 0.05 {
-                    must_ok = false;
-                    break;
+                let actual = effective_value(*field, &values, resalter);
+                if let Some(o) = resalter.get(field) {
+                    if !override_present(o) {
+                        must_ok = false;
+                        break;
+                    }
+                    if !override_matches(*want, o) {
+                        must_ok = false;
+                        break;
+                    }
+                    must_error += (effective_value(*field, &values, resalter) - want).abs();
+                } else {
+                    if actual <= 0.0 || (actual - want).abs() > 0.05 {
+                        must_ok = false;
+                        break;
+                    }
+                    must_error += (actual - want).abs();
                 }
-                must_error += (actual - want).abs();
             }
             if !must.is_empty() && must_ok {
                 exact.push(ArtifactMatch {
                     seed,
                     tier,
-                    values: collect_values(&values, &fields),
+                    values: collect_values(&values, &fields, resalter),
                     error: must_error,
                 });
             } else if !can.is_empty() {
                 partial.push(ArtifactMatch {
                     seed,
                     tier,
-                    values: collect_values(&values, &fields),
+                    values: collect_values(&values, &fields, resalter),
                     error: can_error,
                 });
             }
@@ -782,7 +845,7 @@ mod tests {
     fn find_matches_must_only_and_can_only() {
         // Must-only: exact matches require the must fields within 0.05.
         let must = HashMap::from([(0, 3.0)]);
-        let res = find_matches(3, 6, 6, &must, &HashMap::new());
+        let res = find_matches(3, 6, 6, &must, &HashMap::new(), &HashMap::new());
         assert!(!res.exact.is_empty());
         assert!(res.partial.is_empty(), "no can filters -> nothing partial");
         for m in &res.exact {
@@ -795,7 +858,7 @@ mod tests {
 
         // Can-only: every can-present seed is a partial match, nothing exact.
         let can = HashMap::from([(0, 3.0)]);
-        let res = find_matches(3, 6, 6, &HashMap::new(), &can);
+        let res = find_matches(3, 6, 6, &HashMap::new(), &can, &HashMap::new());
         assert!(res.exact.is_empty(), "no must filters -> nothing exact");
         assert!(!res.partial.is_empty());
         for m in &res.partial {
@@ -811,7 +874,7 @@ mod tests {
     fn find_matches_combined() {
         // With both filters, a seed matching both is exact; seeds with the can field but not the exact must value are partial, never repeated.
         let must = HashMap::from([(0, 3.0)]);
-        let res = find_matches(3, 6, 6, &must, &HashMap::new());
+        let res = find_matches(3, 6, 6, &must, &HashMap::new(), &HashMap::new());
         let seed_a = res
             .exact
             .iter()
@@ -821,7 +884,7 @@ mod tests {
         let v1 = compute_artifact_values(seed_a, 3, 6)[1];
         let must2 = HashMap::from([(1, v1)]);
         let can = HashMap::from([(0, 3.0)]);
-        let res2 = find_matches(3, 6, 6, &must2, &can);
+        let res2 = find_matches(3, 6, 6, &must2, &can, &HashMap::new());
         assert!(
             res2.exact.iter().any(|m| m.seed == seed_a),
             "a seed matching both filters must be an exact match"
@@ -847,14 +910,14 @@ mod tests {
     #[test]
     fn find_matches_empty_and_impossible() {
         // Neither filter set: both lists empty.
-        let res = find_matches(3, 6, 6, &HashMap::new(), &HashMap::new());
+        let res = find_matches(3, 6, 6, &HashMap::new(), &HashMap::new(), &HashMap::new());
         assert!(res.exact.is_empty());
         assert!(res.partial.is_empty());
         // An impossible must field (never rollable by the subtype) blocks the
         // exact list; can-only seeds still appear as partial matches.
         let can = HashMap::from([(0, 3.0)]);
         let impossible = HashMap::from([(13, 7.0)]);
-        let res = find_matches(3, 6, 6, &impossible, &can);
+        let res = find_matches(3, 6, 6, &impossible, &can, &HashMap::new());
         assert!(res.exact.is_empty());
         assert!(!res.partial.is_empty());
         for m in &res.partial {
@@ -862,7 +925,7 @@ mod tests {
             assert!(values[0] > 0.0);
         }
         // An impossible must field alone yields nothing at all.
-        let res = find_matches(3, 6, 6, &impossible, &HashMap::new());
+        let res = find_matches(3, 6, 6, &impossible, &HashMap::new(), &HashMap::new());
         assert!(res.exact.is_empty());
         assert!(res.partial.is_empty());
     }
@@ -871,7 +934,7 @@ mod tests {
     fn find_matches_all_tiers_works() {
         // Across all tiers, can-only partial matches come from many tiers.
         let can = HashMap::from([(0, 3.0)]);
-        let res = find_matches(3, 0, 40, &HashMap::new(), &can);
+        let res = find_matches(3, 0, 40, &HashMap::new(), &can, &HashMap::new());
         assert!(res.exact.is_empty());
         assert!(!res.partial.is_empty());
         // Each match carries its correct tier and seed range.
@@ -970,5 +1033,48 @@ mod tests {
         let (min, max) = effective_range_union(3, 6, 6, 0, None).unwrap();
         assert!((min - 1.75).abs() < 0.001);
         assert!((max - 4.75).abs() < 0.001);
+    }
+
+    #[test]
+    fn find_matches_with_resalter_override() {
+        // A static override fixes the value: every seed in the tier matches the static value.
+        let static_o = ArtifactBoostOverride {
+            min: 5.0,
+            max: 5.0,
+            static_boost: true,
+            static_value: 25.0,
+        };
+        let resalter = HashMap::from([(0, static_o)]);
+        let must = HashMap::from([(0, 25.0)]);
+        let res = find_matches(3, 6, 6, &must, &HashMap::new(), &resalter);
+        assert_eq!(res.exact.len(), 2000, "static override: every seed matches");
+        assert!(res.partial.is_empty());
+        for m in &res.exact {
+            assert!((m.values[0].1 - 25.0).abs() < 0.001);
+        }
+        // A desired value outside the static value never matches.
+        let must2 = HashMap::from([(0, 3.0)]);
+        let res2 = find_matches(3, 6, 6, &must2, &HashMap::new(), &resalter);
+        assert!(res2.exact.is_empty());
+
+        // A min/max override: any desired value inside the range is achievable on every seed.
+        let range_o = ArtifactBoostOverride {
+            min: 5.0,
+            max: 40.0,
+            static_boost: false,
+            static_value: 5.0,
+        };
+        let resalter2 = HashMap::from([(0, range_o)]);
+        let must3 = HashMap::from([(0, 20.0)]);
+        let res3 = find_matches(3, 6, 6, &must3, &HashMap::new(), &resalter2);
+        assert_eq!(res3.exact.len(), 2000, "min/max override: in-range value matches every seed");
+        // A value outside the range never matches.
+        let must4 = HashMap::from([(0, 50.0)]);
+        let res4 = find_matches(3, 6, 6, &must4, &HashMap::new(), &resalter2);
+        assert!(res4.exact.is_empty());
+        // The displayed value is the range midpoint.
+        for m in &res3.exact {
+            assert!((m.values[0].1 - 22.5).abs() < 0.001);
+        }
     }
 }
