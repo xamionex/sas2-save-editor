@@ -49,6 +49,14 @@ pub struct SaveEditor {
     // Globally loaded item icon atlas (items.xnb), loaded lazily when the equipment tab is first opened.
     pub item_atlas: Option<ItemAtlas>,
 
+    // Cosmetics tab: composed player sprite preview (body + hair/beard overlays + face features).
+    pub player_preview: Option<crate::player_preview::PlayerPreview>,
+    pub player_preview_error: Option<String>,
+    /// Cosmetics preview override for the hazeburnt body/variant colors.
+    /// None = use the save's stats.hazeburnt value.
+    /// Preview only.
+    pub cosmetics_preview_hazeburnt: Option<bool>,
+
     // Skill tree rendering
     pub skilltree_texture: Option<TextureHandle>,
     pub skilltree_texture_error: Option<String>,
@@ -219,6 +227,10 @@ impl SaveEditor {
 
             item_atlas: None,
 
+            player_preview: None,
+            player_preview_error: None,
+            cosmetics_preview_hazeburnt: None,
+
             skilltree_texture: None,
             skilltree_texture_error: None,
             skilltree_zoom: 0.5,
@@ -360,6 +372,8 @@ impl SaveEditor {
         self.item_atlas = None;
         self.skilltree_texture = None;
         self.skilltree_centered = false;
+        self.player_preview = None;
+        self.player_preview_error = None;
     }
 
     pub fn choose_game_folder(&mut self) {
@@ -630,6 +644,21 @@ impl SaveEditor {
                         }
                         if ui.button("Reset").clicked() {
                             self.config.sidebar_font_size = default_sidebar_font_size();
+                            self.config_save_timer = 0.1;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        if ui
+                            .checkbox(
+                                &mut self.config.cosmetic_color_swatches,
+                                "Cosmetic color swatch bars",
+                            )
+                            .on_hover_text(
+                                "Draw a palette swatch under the color tiles of the Cosmetics tab.",
+                            )
+                            .changed()
+                        {
                             self.config_save_timer = 0.1;
                         }
                     });

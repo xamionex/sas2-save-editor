@@ -63,6 +63,10 @@ pub struct SaveEditorConfig {
     #[serde(default = "default_true")]
     pub group_by_category: bool,
 
+    /// Draw a palette swatch bar under the cosmetics color tiles (eye/hair/beard/eyebrow).
+    #[serde(default = "default_true")]
+    pub cosmetic_color_swatches: bool,
+
     #[serde(default)]
     pub equipment_panel_width: f32,
 
@@ -193,6 +197,7 @@ impl Default for SaveEditorConfig {
             upgrade_style: crate::tabs::multisel::UpgradeStyle::Digits,
             artifact_seed_style: crate::tabs::multisel::UpgradeStyle::Digits,
             group_by_category: true,
+            cosmetic_color_swatches: true,
             equipment_panel_width: 0.0,
             add_items_panel_width: 0.0,
             skilltree_panel_width: 0.0,

@@ -376,8 +376,9 @@ pub fn assemble_monster_sprite(
             cx,
             cy,
             rot,
-            scale_x: part.scaling.0,
-            scale_y: part.scaling.1,
+            // The game draws part sprites at half the part scale (CharDraw: vector5 *= 0.5f), while part locations stay in the authoring space. Without the halving, sprites come out twice as large as their slots and limbs overlap.
+            scale_x: part.scaling.0 * 0.5,
+            scale_y: part.scaling.1 * 0.5,
             flip: part.flip,
         });
     }
@@ -519,3 +520,5 @@ pub fn assemble_monster_sprite(
 
     Some(canvas)
 }
+
+

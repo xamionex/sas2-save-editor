@@ -4,6 +4,7 @@ mod atlas;
 mod catalog;
 mod config;
 mod export;
+mod player_preview;
 mod tabs;
 
 use crate::app::SaveEditor;

@@ -184,14 +184,20 @@ impl SaveEditor {
                 })
                 .collect();
 
-            // Group by type/subtype
+            // Group by type/subtype, using the same category names as the resalinated app (e.g. "Monster - SubType 0", "Trap - SubType 1").
             let mut grouped: HashMap<String, Vec<(usize, &str, Option<egui::TextureHandle>)>> =
                 HashMap::new();
             for (idx, name, tex) in filtered {
                 let cat = catalog
                     .monsters
                     .get(idx)
-                    .map(|m| format!("Type {} - SubType {}", m.type_, m.sub_type))
+                    .map(|m| {
+                        format!(
+                            "{} - SubType {}",
+                            sas2_parser::monster_names::get_monster_type_name(m.type_),
+                            m.sub_type
+                        )
+                    })
                     .unwrap_or_else(|| "Unknown".to_string());
                 grouped.entry(cat).or_default().push((idx, name, tex));
             }
