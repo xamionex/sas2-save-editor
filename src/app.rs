@@ -144,7 +144,7 @@ pub struct SaveEditor {
     pub artifact_pending_move: Option<(usize, i32)>,
     /// Cached Resalter artifact_boosts.json contents, keyed by game path.
     pub resalter_boosts_cache: Option<(
-        std::path::PathBuf,
+        PathBuf,
         std::collections::HashMap<i32, crate::artifact::ArtifactBoostOverride>,
     )>,
 
@@ -827,10 +827,102 @@ impl SaveEditor {
 
         self.settings_open = is_open;
     }
+
+    fn update_runtime(&mut self, ctx: &egui::Context) {
+        self.monster_texture_cache.update(ctx);
+
+        if self.monster_texture_cache.is_loading() {
+            ctx.request_repaint();
+        }
+    }
+
+    fn update_window_state(&mut self, ctx: &egui::Context) {
+        // Process monster texture loading
+        //if self.active_tab == Tab::Bestiary {
+
+        // Check for XNB tree completion
+        if self.export_tree_loading {
+            if let Some(rx) = &self.export_tree_receiver {
+                if let Ok(tree) = rx.try_recv() {
+                    // Tree ready!
+                    self.export_picker = tree;
+                    self.export_picker_open = true;
+                    self.export_tree_loading = false;
+                    self.export_tree_receiver = None;
+                } else {
+                    // Still scanning, keep refreshing
+                    ctx.request_repaint();
+                }
+            }
+        }
+
+        if let Some(state) = &self.export_state {
+            if !state.done.load(Ordering::Relaxed) {
+                ctx.request_repaint();
+            }
+        }
+
+        // Persist window position/size/maximized state when enabled.
+        // Re-arms the throttled config save only when the window state actually changed.
+        if self.config.save_window_position || self.config.save_window_state {
+            let info = ctx.input(|i| i.viewport().clone());
+            let mut changed = false;
+            if self.config.save_window_position {
+                // Position is unavailable on Wayland (winit cannot query it), keep the last known value in that case.
+                if let Some(rect) = info.outer_rect {
+                    let pos = [rect.min.x, rect.min.y];
+                    if self.config.window_pos != Some(pos) {
+                        self.config.window_pos = Some(pos);
+                        changed = true;
+                    }
+                }
+                // Size: prefer inner_rect, fall back to the viewport content rect which is available on all platforms.
+                let size = info
+                    .inner_rect
+                    .map(|r| [r.width(), r.height()])
+                    .or_else(|| {
+                        let r = ctx.viewport_rect();
+                        Some([r.width(), r.height()])
+                    });
+                if let Some(size) = size {
+                    if self.config.window_size != Some(size) {
+                        self.config.window_size = Some(size);
+                        changed = true;
+                    }
+                }
+            }
+            if self.config.save_window_state {
+                let maximized = info.maximized.unwrap_or(false);
+                if self.config.window_maximized != maximized {
+                    self.config.window_maximized = maximized;
+                    changed = true;
+                }
+            }
+            if changed {
+                self.config_save_timer = 0.1;
+            }
+        }
+
+        if self.config_save_timer > 0.0 {
+            self.config_save_timer -= ctx.input(|i| i.stable_dt);
+
+            if self.config_save_timer <= 0.01 {
+                self.config.save();
+                eprintln!("Config saved.");
+                self.config_save_timer = 0.0;
+            }
+        }
+        //}
+    }
 }
 
 impl eframe::App for SaveEditor {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut Frame) {
+        let ctx = ui.ctx();
+
+        self.update_runtime(ctx);
+        self.update_window_state(ctx);
+
         if self.skilltree_texture.is_none() && self.skilltree_catalog.is_some() {
             if let Some(game_path) = &self.config.game_path {
                 match load_skilltree_texture(game_path, ui.ctx()) {
@@ -994,88 +1086,5 @@ impl eframe::App for SaveEditor {
                 }
             }
         });
-    }
-
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
-        // Process monster texture loading
-        //if self.active_tab == Tab::Bestiary {
-        self.monster_texture_cache.update(ctx);
-        if self.monster_texture_cache.is_loading() {
-            ctx.request_repaint();
-        }
-
-        // Check for XNB tree completion
-        if self.export_tree_loading {
-            if let Some(rx) = &self.export_tree_receiver {
-                if let Ok(tree) = rx.try_recv() {
-                    // Tree ready!
-                    self.export_picker = tree;
-                    self.export_picker_open = true;
-                    self.export_tree_loading = false;
-                    self.export_tree_receiver = None;
-                } else {
-                    // Still scanning, keep refreshing
-                    ctx.request_repaint();
-                }
-            }
-        }
-
-        if let Some(state) = &self.export_state {
-            if !state.done.load(Ordering::Relaxed) {
-                ctx.request_repaint();
-            }
-        }
-
-        // Persist window position/size/maximized state when enabled.
-        // Re-arms the throttled config save only when the window state actually changed.
-        if self.config.save_window_position || self.config.save_window_state {
-            let info = ctx.input(|i| i.viewport().clone());
-            let mut changed = false;
-            if self.config.save_window_position {
-                // Position is unavailable on Wayland (winit cannot query it), keep the last known value in that case.
-                if let Some(rect) = info.outer_rect {
-                    let pos = [rect.min.x, rect.min.y];
-                    if self.config.window_pos != Some(pos) {
-                        self.config.window_pos = Some(pos);
-                        changed = true;
-                    }
-                }
-                // Size: prefer inner_rect, fall back to the viewport content rect which is available on all platforms.
-                let size = info
-                    .inner_rect
-                    .map(|r| [r.width(), r.height()])
-                    .or_else(|| {
-                        let r = ctx.viewport_rect();
-                        Some([r.width(), r.height()])
-                    });
-                if let Some(size) = size {
-                    if self.config.window_size != Some(size) {
-                        self.config.window_size = Some(size);
-                        changed = true;
-                    }
-                }
-            }
-            if self.config.save_window_state {
-                let maximized = info.maximized.unwrap_or(false);
-                if self.config.window_maximized != maximized {
-                    self.config.window_maximized = maximized;
-                    changed = true;
-                }
-            }
-            if changed {
-                self.config_save_timer = 0.1;
-            }
-        }
-
-        if self.config_save_timer > 0.0 {
-            self.config_save_timer -= ctx.input(|i| i.stable_dt);
-
-            if self.config_save_timer <= 0.01 {
-                self.config.save();
-                eprintln!("Config saved.");
-                self.config_save_timer = 0.0;
-            }
-        }
-        //}
     }
 }
