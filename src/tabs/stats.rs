@@ -72,7 +72,7 @@ impl SaveEditor {
                 .add(
                     egui::DragValue::new(&mut ng)
                         .speed(self.config.drag_value_sensitivity)
-                        .range(0..=999999),
+                        .range(0..=1_000_000_000_000_i64),
                 )
                 .changed()
             {
@@ -103,7 +103,7 @@ impl SaveEditor {
                 .add(
                     egui::DragValue::new(&mut save.stats.level)
                         .speed(self.config.drag_value_sensitivity)
-                        .range(1..=999999),
+                        .range(1..=999),
                 )
                 .changed()
             {
@@ -129,7 +129,7 @@ impl SaveEditor {
             ui.add(
                 egui::DragValue::new(&mut save.stats.xp)
                     .speed(100)
-                    .range(0..=999999),
+                    .range(0..=1_000_000_000_000_i64),
             );
         });
         ui.horizontal(|ui| {
@@ -137,7 +137,7 @@ impl SaveEditor {
             ui.add(
                 egui::DragValue::new(&mut save.stats.silver)
                     .speed(100)
-                    .range(0..=999999),
+                    .range(0..=1_000_000_000_000_i64),
             );
         });
         ui.horizontal(|ui| {
@@ -145,7 +145,7 @@ impl SaveEditor {
             ui.add(
                 egui::DragValue::new(&mut save.stats.time_played)
                     .speed(1.0)
-                    .range(0.0..=1e9),
+                    .range(0.0..=1e12),
             );
         });
         ui.horizontal(|ui| {

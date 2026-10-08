@@ -225,7 +225,7 @@ impl SaveEditor {
             .min_size(min_size)
             .max_size(full_width * 0.8)
             .size_range(min_size..=full_width * 0.8)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
 
                 // Multi-selection: edit the unlock level of every selected node.
@@ -368,7 +368,7 @@ impl SaveEditor {
             self.config_save_timer = 0.5;
         }
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let canvas_rect = ui.available_rect_before_wrap();
 
             // Selection gesture state (click / ctrl+click / shift+click / shift+drag box).

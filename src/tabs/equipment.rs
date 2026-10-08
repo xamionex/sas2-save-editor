@@ -397,7 +397,7 @@ impl SaveEditor {
             .min_size(min_size)
             .max_size(full_width * 0.8)
             .size_range(min_size..=full_width * 0.8)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
 
                 // Multi-selection: edit the common fields of every selected item.
@@ -614,7 +614,7 @@ impl SaveEditor {
             self.config_save_timer = 0.25;
         }
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             // Selection gesture state (click / ctrl+click / shift+click / shift+drag box).
             // Taken out of self so the scroll closure can mutate it while borrowing self immutably for the catalog/atlas.
             let mut gsel = std::mem::take(&mut self.equipment_grid_sel);
@@ -874,7 +874,7 @@ impl SaveEditor {
             .min_size(min_size)
             .max_size(full_width * 0.8)
             .size_range(min_size..=full_width * 0.8)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
 
                 // Multi-selection: add all selected items.
@@ -999,7 +999,7 @@ impl SaveEditor {
         }
 
         // Central panel: scrollable grid of items
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             // Selection gesture state (click / ctrl+click / shift+click / shift+drag box).
             let mut gsel = std::mem::take(&mut self.add_items_grid_sel);
             gsel.begin(ui);

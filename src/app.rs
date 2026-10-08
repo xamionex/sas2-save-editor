@@ -941,7 +941,7 @@ impl eframe::App for SaveEditor {
             }
         }
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             // Menu bar
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
@@ -998,7 +998,7 @@ impl eframe::App for SaveEditor {
                 // Tab bar
                 egui::Panel::top("tabs")
                     .show_separator_line(false)
-                    .show_inside(ui, |ui| {
+                    .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             let tabs = self.config.tabs_font_size;
                             ui.selectable_value(&mut self.active_tab, Tab::Stats, egui::RichText::new("Stats").size(tabs));

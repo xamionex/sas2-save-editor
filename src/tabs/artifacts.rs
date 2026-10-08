@@ -989,7 +989,7 @@ impl SaveEditor {
             .default_size(list_width)
             .min_size(120.0)
             .frame(egui::Frame::NONE)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.label(egui::RichText::new("Artifacts").strong());
                 // Row button widths, measured once: the label truncates into the remaining space so the buttons stay visible.
                 let button_font_id = egui::TextStyle::Button.resolve(ui.style());
@@ -1131,7 +1131,7 @@ impl SaveEditor {
                 .min_size(320.0)
                 .max_size(full_width * 0.8)
                 .size_range(320.0..=full_width * 0.8)
-                .show_inside(ui, |ui| {
+                .show(ui, |ui| {
                     let editors_h = ((ui.available_height() - 15.0) / 2.0).max(120.0);
 
                     ui.allocate_ui_with_layout(
@@ -1185,7 +1185,7 @@ impl SaveEditor {
             }
 
             // Central panel: the selected artifact header, search controls and the results list.
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 ui.heading(&entry.name);
                 ui.label(format!("Type: Charm - {}", subtype_name));
                 ui.label(format!(
@@ -1372,7 +1372,7 @@ impl SaveEditor {
                 }
             });
         } else {
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 ui.label("Select an artifact.");
             });
         }

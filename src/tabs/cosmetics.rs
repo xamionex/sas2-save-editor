@@ -205,7 +205,7 @@ impl SaveEditor {
             .resizable(true)
             .default_size(preview_height)
             .min_size(120.0)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 self.show_player_preview(ui, &current);
             });
 
