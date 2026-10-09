@@ -6,6 +6,7 @@ mod config;
 mod export;
 mod player_preview;
 mod tabs;
+mod theme;
 
 use crate::app::SaveEditor;
 use crate::config::SaveEditorConfig;

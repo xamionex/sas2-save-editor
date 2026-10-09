@@ -7,9 +7,5 @@ fn main() {
         res.set("CompanyName",     "xamionex");
         res.set("LegalCopyright",  "© 2026 xamionex");
         res.set("OriginalFilename","sas2-save-editor.exe");
-        if let Err(e) = res.compile() {
-            // Print, don't panic — a missing icon shouldn't break the build.
-            println!("cargo:warning=winres failed: {e}");
-        }
     }
 }

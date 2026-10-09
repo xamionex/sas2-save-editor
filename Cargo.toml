@@ -1,10 +1,11 @@
 [package]
 name = "sas2-save-editor"
-version = "1.4.7"
+version = "1.4.8"
 edition = "2024"
 
 [dependencies]
 sas2-parser = { git = "https://github.com/xamionex/sas2-parser.git" }
+sas2-ui-theme = { git = "https://github.com/xamionex/sas2-ui-theme.git" }
 eframe = "0.36.2"
 rfd = "0.17.2"
 directories = "6.0.0"

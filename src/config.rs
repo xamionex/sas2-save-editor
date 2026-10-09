@@ -147,6 +147,10 @@ pub struct SaveEditorConfig {
     /// Always load all artifact search results, bypassing the load-more cap.
     #[serde(default)]
     pub always_load_all_results: bool,
+
+    /// Custom UI theme (Settings -> UI Theme). None = follow the system / egui default theme.
+    #[serde(default)]
+    pub theme: Option<crate::theme::Theme>,
 }
 
 pub fn default_true() -> bool {
@@ -219,6 +223,7 @@ impl Default for SaveEditorConfig {
             artifact_use_sub_sort: false,
             artifact_result_group_by: crate::artifact::ResultGroupBy::None,
             always_load_all_results: false,
+            theme: None,
         }
     }
 }

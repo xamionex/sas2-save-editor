@@ -159,6 +159,12 @@ pub struct SaveEditor {
     // Settings window
     pub settings_open: bool,
 
+    // UI theme (Settings -> UI Theme)
+    pub theme: crate::theme::Theme,
+    /// True once the user customized the theme; then it is applied and stored in the config.
+    pub theme_customized: bool,
+    pub theme_window_open: bool,
+
     // Modded -> vanilla conversion
     pub conversion_target_version: i32,
     pub conversion_just_happened: bool,
@@ -205,6 +211,8 @@ impl SaveEditor {
                 crate::artifact::ResultGroupBy::None,
             )
         };
+        let theme_customized = config.theme.is_some();
+        let theme = config.theme.clone().unwrap_or_default();
         let mut app = Self {
             load_requested: false,
             save_data: None,
@@ -290,6 +298,10 @@ impl SaveEditor {
             export_overwrite: false,
 
             settings_open: false,
+
+            theme,
+            theme_customized,
+            theme_window_open: false,
 
             conversion_target_version: 19,
             conversion_just_happened: false,
@@ -828,6 +840,25 @@ impl SaveEditor {
         self.settings_open = is_open;
     }
 
+    pub fn show_theme_window(&mut self, ctx: &egui::Context) {
+        if !self.theme_window_open {
+            return;
+        }
+
+        let response =
+            crate::theme::show_theme_window(ctx, &mut self.theme_window_open, &mut self.theme);
+        if response.reset_default {
+            self.theme_customized = false;
+            self.config.theme = None;
+            crate::theme::Theme::reset_context(ctx);
+            self.config_save_timer = 0.1;
+        } else if response.changed {
+            self.theme_customized = true;
+            self.config.theme = Some(self.theme.clone());
+            self.config_save_timer = 0.1;
+        }
+    }
+
     fn update_runtime(&mut self, ctx: &egui::Context) {
         self.monster_texture_cache.update(ctx);
 
@@ -920,6 +951,13 @@ impl eframe::App for SaveEditor {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut Frame) {
         let ctx = ui.ctx();
 
+        // Apply the custom theme (or keep tracking the system theme until customized).
+        if self.theme_customized {
+            self.theme.apply(ctx);
+        } else {
+            self.theme = crate::theme::Theme::from_visuals(&ui.style().visuals);
+        }
+
         self.update_runtime(ctx);
         self.update_window_state(ctx);
 
@@ -967,10 +1005,15 @@ impl eframe::App for SaveEditor {
                         self.settings_open = true;
                         ui.close();
                     }
+                    if ui.button("UI Theme").clicked() {
+                        self.theme_window_open = true;
+                        ui.close();
+                    }
                 });
             });
 
             self.show_settings_window(ui.ctx());
+            self.show_theme_window(ui.ctx());
 
             // Game folder status line
             if let Some(game_path) = &self.config.game_path {
